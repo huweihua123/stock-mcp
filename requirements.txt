@@ -19,3 +19,4 @@ structlog==25.5.0
 requests==2.32.5
 beautifulsoup4==4.14.2
 lxml==6.0.2
+nacos-mcp-wrapper-python>=0.1.0

@@ -46,7 +46,7 @@ class FinnhubConfig(BaseAppSettings):
 
 class BaostockConfig(BaseAppSettings):
     """Baostock configuration (free, no API key needed)"""
-    
+
     enabled: bool = Field(True, validation_alias="BAOSTOCK_ENABLED")
 
 
@@ -66,10 +66,32 @@ class APIKeysConfig(BaseAppSettings):
 
 class ProxyConfig(BaseAppSettings):
     """HTTP/HTTPS proxy configuration for external API calls"""
-    
+
     host: str = Field("127.0.0.1", validation_alias="PROXY_HOST")
     port: int = Field(7890, validation_alias="PROXY_PORT")
     enabled: bool = Field(False, validation_alias="PROXY_ENABLED")
+
+
+class NacosConfig(BaseAppSettings):
+    """Nacos MCP configuration"""
+
+    server_addr: str = Field("127.0.0.1:8848", validation_alias="NACOS_SERVER_ADDR")
+    namespace: str = Field("public", validation_alias="NACOS_NAMESPACE")
+    username: str = Field("nacos", validation_alias="NACOS_USERNAME")
+    password: str = Field("nacos", validation_alias="NACOS_PASSWORD")
+
+    # MCP Server configuration
+    mcp_server_name: str = Field(
+        "stock-mcp-server", validation_alias="NACOS_MCP_SERVER_NAME"
+    )
+    mcp_server_version: str = Field(
+        "1.0.0", validation_alias="NACOS_MCP_SERVER_VERSION"
+    )
+    mcp_server_port: int = Field(18001, validation_alias="NACOS_MCP_SERVER_PORT")
+    mcp_transport: str = Field("sse", validation_alias="NACOS_MCP_TRANSPORT")
+
+    # Registration control
+    register_enabled: bool = Field(True, validation_alias="NACOS_REGISTER_ENABLED")
 
 
 class Settings(BaseAppSettings):
@@ -80,6 +102,7 @@ class Settings(BaseAppSettings):
     baostock: BaostockConfig = Field(default_factory=BaostockConfig)
     api_keys: APIKeysConfig = Field(default_factory=APIKeysConfig)
     proxy: ProxyConfig = Field(default_factory=ProxyConfig)
+    nacos: NacosConfig = Field(default_factory=NacosConfig)
 
     # Other optional configs
     cors_origins: str = Field(default="*", validation_alias="CORS_ORIGINS")

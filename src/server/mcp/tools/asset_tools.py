@@ -5,21 +5,24 @@ Returns structured data (JSON).
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
-import asyncio
+from typing import Any, Dict, List
 
-from fastmcp import FastMCP
+from nacos_mcp_wrapper.server.nacos_mcp import NacosMCP
 
 from src.server.core.dependencies import Container
 from src.server.domain.types import AssetSearchQuery, AssetType
 from src.server.utils.logger import logger
 
 
-def register_asset_tools(mcp: FastMCP):
-    """Register asset-related tools."""
+def register_asset_tools(mcp: NacosMCP):
+    """Register asset-related tools for Nacos MCP.
 
-    @mcp.tool(tags={"asset-search", "asset-extended"})
-    async def search_assets(
+    Args:
+        mcp: NacosMCP instance
+    """
+
+    @mcp.tool()
+    def search_assets(
         query: str, asset_types: list[str] = None, limit: int = 10
     ) -> List[Dict[str, Any]]:
         """Search for assets (stocks, ETFs, crypto, etc.).
@@ -48,15 +51,15 @@ def register_asset_tools(mcp: FastMCP):
                 query=query, asset_types=types if types else None, limit=limit
             )
 
-            results = await manager.search_assets(search_query)
+            results = manager.search_assets(search_query)
             return [r.model_dump(mode="json") for r in results]
 
         except Exception as e:
             logger.error(f"Asset search failed: {e}")
             return [{"error": str(e)}]
 
-    @mcp.tool(tags={"asset-info", "asset-extended"})
-    async def get_asset_info(ticker: str) -> Dict[str, Any]:
+    @mcp.tool()
+    def get_asset_info(ticker: str) -> Dict[str, Any]:
         """Get detailed asset information.
 
         Args:
@@ -69,7 +72,7 @@ def register_asset_tools(mcp: FastMCP):
             manager = Container.adapter_manager()
             logger.info("MCP tool called: get_asset_info", ticker=ticker)
 
-            asset = await manager.get_asset_info(ticker)
+            asset = manager.get_asset_info(ticker)
             if asset:
                 return asset.model_dump(mode="json")
             return {"error": f"Asset not found: {ticker}"}
@@ -78,8 +81,8 @@ def register_asset_tools(mcp: FastMCP):
             logger.error(f"Get asset info failed: {e}")
             return {"error": str(e)}
 
-    @mcp.tool(tags={"asset-price", "asset-extended"})
-    async def get_real_time_price(ticker: str) -> Dict[str, Any]:
+    @mcp.tool()
+    def get_real_time_price(ticker: str) -> Dict[str, Any]:
         """Get real-time price for an asset.
 
         Args:
@@ -92,7 +95,7 @@ def register_asset_tools(mcp: FastMCP):
             manager = Container.adapter_manager()
             logger.info("MCP tool called: get_real_time_price", ticker=ticker)
 
-            price = await manager.get_real_time_price(ticker)
+            price = manager.get_real_time_price(ticker)
             if price:
                 return price.to_dict()
             return {"error": f"Price not found for {ticker}"}
@@ -101,8 +104,8 @@ def register_asset_tools(mcp: FastMCP):
             logger.error(f"Get real-time price failed: {e}")
             return {"error": str(e)}
 
-    @mcp.tool(tags={"asset-price-batch", "asset-extended"})
-    async def get_multiple_prices(tickers: list[str]) -> Dict[str, Any]:
+    @mcp.tool()
+    def get_multiple_prices(tickers: list[str]) -> Dict[str, Any]:
         """Get real-time prices for multiple assets.
 
         Args:
@@ -115,7 +118,7 @@ def register_asset_tools(mcp: FastMCP):
             manager = Container.adapter_manager()
             logger.info("MCP tool called: get_multiple_prices", count=len(tickers))
 
-            prices = await manager.get_multiple_prices(tickers)
+            prices = manager.get_multiple_prices(tickers)
             result = {}
             for ticker, price in prices.items():
                 if price:
@@ -128,8 +131,8 @@ def register_asset_tools(mcp: FastMCP):
             logger.error(f"Get multiple prices failed: {e}")
             return {"error": str(e)}
 
-    @mcp.tool(tags={"asset-history", "asset-extended"})
-    async def get_historical_prices(
+    @mcp.tool()
+    def get_historical_prices(
         ticker: str, start_date: str, end_date: str, interval: str = "1d"
     ) -> List[Dict[str, Any]]:
         """Get historical price data.
@@ -155,7 +158,7 @@ def register_asset_tools(mcp: FastMCP):
             start = datetime.strptime(start_date, "%Y-%m-%d")
             end = datetime.strptime(end_date, "%Y-%m-%d")
 
-            prices = await manager.get_historical_prices(
+            prices = manager.get_historical_prices(
                 ticker=ticker,
                 start_date=start,
                 end_date=end,
@@ -167,8 +170,8 @@ def register_asset_tools(mcp: FastMCP):
             logger.error(f"Get historical prices failed: {e}")
             return [{"error": str(e)}]
 
-    @mcp.tool(tags={"market-report", "asset-extended"})
-    async def get_market_report(symbol: str) -> Dict[str, Any]:
+    @mcp.tool()
+    def get_market_report(symbol: str) -> Dict[str, Any]:
         """Get a comprehensive market report for the given ticker.
         Includes current price and asset info.
 
@@ -182,10 +185,9 @@ def register_asset_tools(mcp: FastMCP):
             manager = Container.adapter_manager()
             logger.info("MCP tool called: get_market_report", symbol=symbol)
 
-            # Fetch info and price in parallel
-            info, price = await asyncio.gather(
-                manager.get_asset_info(symbol), manager.get_real_time_price(symbol)
-            )
+            # Fetch info and price sequentially (now synchronous)
+            info = manager.get_asset_info(symbol)
+            price = manager.get_real_time_price(symbol)
 
             return {
                 "symbol": symbol,
@@ -196,3 +198,5 @@ def register_asset_tools(mcp: FastMCP):
         except Exception as e:
             logger.error(f"Failed to get market report: {e}")
             return {"error": str(e)}
+
+    logger.info("✅ Registered 6 asset tools for Nacos MCP")

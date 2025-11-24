@@ -6,15 +6,21 @@ Returns structured data (JSON).
 
 from typing import Any, Dict
 
-from fastmcp import FastMCP
+from nacos_mcp_wrapper.server.nacos_mcp import NacosMCP
 
 from src.server.core.dependencies import Container
 from src.server.utils.logger import logger
 
 
-def register_fundamental_tools(mcp: FastMCP):
-    @mcp.tool(tags={"fundamental-financial", "fundamental-core"})
-    async def get_financial_report(symbol: str) -> Dict[str, Any]:
+def register_fundamental_tools(mcp: NacosMCP):
+    """Register fundamental analysis tools for Nacos MCP.
+
+    Args:
+        mcp: NacosMCP instance
+    """
+
+    @mcp.tool()
+    def get_financial_report(symbol: str) -> Dict[str, Any]:
         """Get financial report for the given ticker.
 
         Args:
@@ -30,7 +36,9 @@ def register_fundamental_tools(mcp: FastMCP):
         ticker = _normalize_ticker(symbol)
         logger.info(f"Normalized ticker: {symbol} -> {ticker}")
 
-        return await service.get_fundamental_analysis(ticker)
+        return service.get_fundamental_analysis(ticker)
+
+    logger.info("✅ Registered 1 fundamental tool for Nacos MCP")
 
 
 def _normalize_ticker(symbol: str) -> str:
@@ -49,9 +57,6 @@ def _normalize_ticker(symbol: str) -> str:
         # 0或3开头 = 深交所 (SZSE)
         elif symbol.startswith(("0", "3")):
             return f"SZSE:{symbol}"
-        # 8开头 = 北交所 (BSE)
-        elif symbol.startswith("8"):
-            return f"BSE:{symbol}"
 
-    # Default to NASDAQ for US stocks (most common)
+    # Default to NASDAQ for US stocks
     return f"NASDAQ:{symbol}"

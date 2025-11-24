@@ -1,22 +1,35 @@
-# src/server/mcp/tools/research_tools.py
-"""MCP tool for deep research.
-Combines market data, fundamental data, and recent news into a structured report.
-Returns structured data (JSON).
+"""
+Author: weihua hu
+Date: 2025-11-25 01:47:01
+LastEditTime: 2025-11-25 01:52:18
+LastEditors: weihua hu
+Description:
 """
 
-import asyncio
+# src/server/mcp/tools/research_tools.py
+"""MCP tool for deep research.
+Combines market data, fundamental data, and recent news into a structured
+report. Returns structured data (JSON).
+"""
+
 from datetime import datetime, timedelta
 from typing import Any, Dict
 
-from fastmcp import FastMCP
+from nacos_mcp_wrapper.server.nacos_mcp import NacosMCP
 
 from src.server.core.dependencies import Container
 from src.server.utils.logger import logger
 
 
-def register_research_tools(mcp: FastMCP):
-    @mcp.tool(tags={"research", "analysis", "core"})
-    async def perform_deep_research(symbol: str, days_back: int = 30) -> Dict[str, Any]:
+def register_research_tools(mcp: NacosMCP):
+    """Register research tools for Nacos MCP.
+
+    Args:
+        mcp: NacosMCP instance
+    """
+
+    @mcp.tool()
+    def perform_deep_research(symbol: str, days_back: int = 30) -> Dict[str, Any]:
         """Generate a deep research report for `symbol`.
 
         Aggregates:
@@ -32,23 +45,21 @@ def register_research_tools(mcp: FastMCP):
             Dictionary containing aggregated research data
         """
         logger.info(
-            "MCP tool called: perform_deep_research", symbol=symbol, days_back=days_back
+            "MCP tool: perform_deep_research", symbol=symbol, days_back=days_back
         )
 
         manager = Container.adapter_manager()
         fundamental_srv = Container.fundamental_service()
         news_srv = Container.news_service()
 
-        # Define tasks
-        async def get_market_data():
+        def get_market_data():
             try:
-                # Get price and recent history
                 end = datetime.now()
-                start = end - timedelta(days=365)  # 1 year history
+                start = end - timedelta(days=365)
 
-                price = await manager.get_real_time_price(symbol)
-                history = await manager.get_historical_prices(symbol, start, end)
-                info = await manager.get_asset_info(symbol)
+                price = manager.get_real_time_price(symbol)
+                history = manager.get_historical_prices(symbol, start, end)
+                info = manager.get_asset_info(symbol)
 
                 return {
                     "info": info.model_dump(mode="json") if info else None,
@@ -59,21 +70,26 @@ def register_research_tools(mcp: FastMCP):
                 logger.error(f"Market data fetch failed: {e}")
                 return {"error": str(e)}
 
-        async def get_fundamentals():
-            return await fundamental_srv.get_fundamental_analysis(symbol)
+        def get_fundamentals():
+            return fundamental_srv.get_fundamental_analysis(symbol)
 
-        async def get_news():
-            return await news_srv.fetch_latest_news(symbol, days_back)
+        def get_news():
+            return news_srv.fetch_latest_news(symbol, days_back)
 
-        # Run concurrently
-        market_data, fundamentals, news = await asyncio.gather(
-            get_market_data(), get_fundamentals(), get_news()
-        )
+        def run_research():
+            # 同步依次调用，不再使用 asyncio.gather
+            market_data = get_market_data()
+            fundamentals = get_fundamentals()
+            news = get_news()
 
-        return {
-            "symbol": symbol,
-            "timestamp": datetime.now().isoformat(),
-            "market_data": market_data,
-            "fundamentals": fundamentals,
-            "news": news,
-        }
+            return {
+                "symbol": symbol,
+                "timestamp": datetime.now().isoformat(),
+                "market_data": market_data,
+                "fundamentals": fundamentals,
+                "news": news,
+            }
+
+        return run_research()
+
+    logger.info("✅ Registered 1 research tool for Nacos MCP")

@@ -6,17 +6,21 @@ Returns structured data (JSON).
 
 from typing import Any, Dict
 
-from fastmcp import FastMCP
+from nacos_mcp_wrapper.server.nacos_mcp import NacosMCP
 
 from src.server.core.dependencies import Container
 from src.server.utils.logger import logger
 
 
-def register_technical_tools(mcp: FastMCP):
-    """Register technical analysis tools."""
+def register_technical_tools(mcp: NacosMCP):
+    """Register technical analysis tools for Nacos MCP.
 
-    @mcp.tool(tags={"technical-indicators", "technical-extended"})
-    async def calculate_technical_indicators(
+    Args:
+        mcp: NacosMCP instance
+    """
+
+    @mcp.tool()
+    def calculate_technical_indicators(
         symbol: str, period: str = "30d", interval: str = "1d"
     ) -> Dict[str, Any]:
         """Calculate technical indicators.
@@ -47,8 +51,8 @@ def register_technical_tools(mcp: FastMCP):
                 interval=interval,
             )
 
-            result = await service.calculate_indicators(
-                symbol=symbol, period=period, interval=interval
+            result = service.calculate_indicators(
+                    symbol=symbol, period=period, interval=interval
             )
 
             return result
@@ -57,8 +61,8 @@ def register_technical_tools(mcp: FastMCP):
             logger.error(f"Calculate technical indicators failed: {e}")
             return {"error": str(e)}
 
-    @mcp.tool(tags={"technical-signal", "technical-extended"})
-    async def generate_trading_signal(
+    @mcp.tool()
+    def generate_trading_signal(
         symbol: str, period: str = "30d", interval: str = "1d"
     ) -> Dict[str, Any]:
         """Generate trading signals based on technical indicators.
@@ -77,8 +81,8 @@ def register_technical_tools(mcp: FastMCP):
                 "MCP tool called: generate_trading_signal", symbol=symbol, period=period
             )
 
-            result = await service.generate_trading_signal(
-                symbol=symbol, period=period, interval=interval
+            result = service.generate_trading_signal(
+                    symbol=symbol, period=period, interval=interval
             )
 
             return result
@@ -87,8 +91,8 @@ def register_technical_tools(mcp: FastMCP):
             logger.error(f"Generate trading signal failed: {e}")
             return {"error": str(e)}
 
-    @mcp.tool(tags={"technical-pattern", "technical-extended"})
-    async def analyze_price_patterns(symbol: str, period: str = "90d") -> Dict[str, Any]:
+    @mcp.tool()
+    def analyze_price_patterns(symbol: str, period: str = "90d") -> Dict[str, Any]:
         """Analyze price patterns.
 
         Args:
@@ -104,7 +108,8 @@ def register_technical_tools(mcp: FastMCP):
                 "MCP tool called: analyze_price_patterns", symbol=symbol, period=period
             )
 
-            result = await service.analyze_price_patterns(symbol=symbol, period=period)
+            result = service.analyze_price_patterns(symbol=symbol, period=period
+            )
 
             return result
 
@@ -112,8 +117,10 @@ def register_technical_tools(mcp: FastMCP):
             logger.error(f"Analyze price patterns failed: {e}")
             return {"error": str(e)}
 
-    @mcp.tool(tags={"technical-support", "technical-extended"})
-    async def calculate_support_resistance(symbol: str, period: str = "90d") -> Dict[str, Any]:
+    @mcp.tool()
+    def calculate_support_resistance(
+        symbol: str, period: str = "90d"
+    ) -> Dict[str, Any]:
         """Calculate support and resistance levels.
 
         Args:
@@ -131,8 +138,7 @@ def register_technical_tools(mcp: FastMCP):
                 period=period,
             )
 
-            result = await service.calculate_support_resistance(
-                symbol=symbol, period=period
+            result = service.calculate_support_resistance(symbol=symbol, period=period
             )
 
             return result
@@ -141,8 +147,8 @@ def register_technical_tools(mcp: FastMCP):
             logger.error(f"Calculate support/resistance failed: {e}")
             return {"error": str(e)}
 
-    @mcp.tool(tags={"technical-volume", "technical-extended"})
-    async def analyze_volume_profile(symbol: str, period: str = "90d") -> Dict[str, Any]:
+    @mcp.tool()
+    def analyze_volume_profile(symbol: str, period: str = "90d") -> Dict[str, Any]:
         """Analyze volume profile.
 
         Args:
@@ -158,10 +164,13 @@ def register_technical_tools(mcp: FastMCP):
                 "MCP tool called: analyze_volume_profile", symbol=symbol, period=period
             )
 
-            result = await service.analyze_volume_profile(symbol=symbol, period=period)
+            result = service.analyze_volume_profile(symbol=symbol, period=period
+            )
 
             return result
 
         except Exception as e:
             logger.error(f"Analyze volume profile failed: {e}")
             return {"error": str(e)}
+
+    logger.info("✅ Registered 5 technical tools for Nacos MCP")
