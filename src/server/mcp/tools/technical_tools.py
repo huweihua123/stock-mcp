@@ -20,7 +20,7 @@ def register_technical_tools(mcp: NacosMCP):
     """
 
     @mcp.tool()
-    def calculate_technical_indicators(
+    async def calculate_technical_indicators(
         symbol: str, period: str = "30d", interval: str = "1d"
     ) -> Dict[str, Any]:
         """Calculate technical indicators.
@@ -51,8 +51,8 @@ def register_technical_tools(mcp: NacosMCP):
                 interval=interval,
             )
 
-            result = service.calculate_indicators(
-                    symbol=symbol, period=period, interval=interval
+            result = await service.calculate_indicators(
+                symbol=symbol, period=period, interval=interval
             )
 
             return result
@@ -62,7 +62,7 @@ def register_technical_tools(mcp: NacosMCP):
             return {"error": str(e)}
 
     @mcp.tool()
-    def generate_trading_signal(
+    async def generate_trading_signal(
         symbol: str, period: str = "30d", interval: str = "1d"
     ) -> Dict[str, Any]:
         """Generate trading signals based on technical indicators.
@@ -81,8 +81,8 @@ def register_technical_tools(mcp: NacosMCP):
                 "MCP tool called: generate_trading_signal", symbol=symbol, period=period
             )
 
-            result = service.generate_trading_signal(
-                    symbol=symbol, period=period, interval=interval
+            result = await service.generate_trading_signal(
+                symbol=symbol, period=period, interval=interval
             )
 
             return result
@@ -92,7 +92,9 @@ def register_technical_tools(mcp: NacosMCP):
             return {"error": str(e)}
 
     @mcp.tool()
-    def analyze_price_patterns(symbol: str, period: str = "90d") -> Dict[str, Any]:
+    async def analyze_price_patterns(
+        symbol: str, period: str = "90d"
+    ) -> Dict[str, Any]:
         """Analyze price patterns.
 
         Args:
@@ -108,8 +110,7 @@ def register_technical_tools(mcp: NacosMCP):
                 "MCP tool called: analyze_price_patterns", symbol=symbol, period=period
             )
 
-            result = service.analyze_price_patterns(symbol=symbol, period=period
-            )
+            result = await service.analyze_price_patterns(symbol=symbol, period=period)
 
             return result
 
@@ -118,7 +119,7 @@ def register_technical_tools(mcp: NacosMCP):
             return {"error": str(e)}
 
     @mcp.tool()
-    def calculate_support_resistance(
+    async def calculate_support_resistance(
         symbol: str, period: str = "90d"
     ) -> Dict[str, Any]:
         """Calculate support and resistance levels.
@@ -138,7 +139,8 @@ def register_technical_tools(mcp: NacosMCP):
                 period=period,
             )
 
-            result = service.calculate_support_resistance(symbol=symbol, period=period
+            result = await service.calculate_support_resistance(
+                symbol=symbol, period=period
             )
 
             return result
@@ -148,7 +150,9 @@ def register_technical_tools(mcp: NacosMCP):
             return {"error": str(e)}
 
     @mcp.tool()
-    def analyze_volume_profile(symbol: str, period: str = "90d") -> Dict[str, Any]:
+    async def analyze_volume_profile(
+        symbol: str, period: str = "90d"
+    ) -> Dict[str, Any]:
         """Analyze volume profile.
 
         Args:
@@ -164,8 +168,7 @@ def register_technical_tools(mcp: NacosMCP):
                 "MCP tool called: analyze_volume_profile", symbol=symbol, period=period
             )
 
-            result = service.analyze_volume_profile(symbol=symbol, period=period
-            )
+            result = await service.analyze_volume_profile(symbol=symbol, period=period)
 
             return result
 

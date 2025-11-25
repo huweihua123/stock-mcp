@@ -20,7 +20,7 @@ def register_filings_tools(mcp: NacosMCP):
     """
 
     @mcp.tool()
-    def fetch_sec_filings(
+    async def fetch_sec_filings(
         ticker: str,
         filing_types: list[str] = None,
         start_date: str = None,
@@ -48,19 +48,20 @@ def register_filings_tools(mcp: NacosMCP):
                 limit=limit,
             )
 
-            return service.fetch_sec_filings(
-                    ticker=ticker,
-                    filing_types=filing_types,
-                    start_date=start_date,
-                    end_date=end_date,
-                    limit=limit)
+            return await service.fetch_sec_filings(
+                ticker=ticker,
+                filing_types=filing_types,
+                start_date=start_date,
+                end_date=end_date,
+                limit=limit,
+            )
 
         except Exception as e:
             logger.error(f"Fetch SEC filings failed: {e}")
             return [{"error": str(e)}]
 
     @mcp.tool()
-    def fetch_ashare_filings(
+    async def fetch_ashare_filings(
         symbol: str,
         filing_types: list[str] = None,
         start_date: str = None,
@@ -88,19 +89,22 @@ def register_filings_tools(mcp: NacosMCP):
                 limit=limit,
             )
 
-            return service.fetch_ashare_filings(
-                    symbol=symbol,
-                    filing_types=filing_types,
-                    start_date=start_date,
-                    end_date=end_date,
-                    limit=limit)
+            return await service.fetch_ashare_filings(
+                symbol=symbol,
+                filing_types=filing_types,
+                start_date=start_date,
+                end_date=end_date,
+                limit=limit,
+            )
 
         except Exception as e:
             logger.error(f"Fetch A-share filings failed: {e}")
             return [{"error": str(e)}]
 
     @mcp.tool()
-    def get_filing_detail(filing_id: str, filing_source: str = "sec") -> Dict[str, Any]:
+    async def get_filing_detail(
+        filing_id: str, filing_source: str = "sec"
+    ) -> Dict[str, Any]:
         """Get detailed content of a filing.
 
         Args:
@@ -118,9 +122,8 @@ def register_filings_tools(mcp: NacosMCP):
                 source=filing_source,
             )
 
-            return service.get_filing_detail(
-                    filing_id=filing_id, filing_source=filing_source
-                
+            return await service.get_filing_detail(
+                filing_id=filing_id, filing_source=filing_source
             )
 
         except Exception as e:
@@ -128,7 +131,7 @@ def register_filings_tools(mcp: NacosMCP):
             return {"error": str(e)}
 
     @mcp.tool()
-    def search_filings_by_keyword(
+    async def search_filings_by_keyword(
         keyword: str,
         market: str = "us",
         filing_types: list[str] = None,
@@ -154,18 +157,16 @@ def register_filings_tools(mcp: NacosMCP):
                 limit=limit,
             )
 
-            return service.search_filings_by_keyword(
-                    keyword=keyword,
-                    market=market,
-                    filing_types=filing_types,
-                    limit=limit)
+            return await service.search_filings_by_keyword(
+                keyword=keyword, market=market, filing_types=filing_types, limit=limit
+            )
 
         except Exception as e:
             logger.error(f"Search filings failed: {e}")
             return [{"error": str(e)}]
 
     @mcp.tool()
-    def get_latest_earnings_reports(
+    async def get_latest_earnings_reports(
         market: str = "us", days: int = 7, limit: int = 50
     ) -> List[Dict[str, Any]]:
         """Get latest earnings reports.
@@ -184,9 +185,8 @@ def register_filings_tools(mcp: NacosMCP):
                 "MCP tool called: get_latest_earnings_reports", market=market, days=days
             )
 
-            return service.get_latest_earnings_reports(
-                    market=market, days=days, limit=limit
-                
+            return await service.get_latest_earnings_reports(
+                market=market, days=days, limit=limit
             )
 
         except Exception as e:

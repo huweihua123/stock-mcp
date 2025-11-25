@@ -1,3 +1,10 @@
+'''
+Author: weihua hu
+Date: 2025-11-25 01:56:00
+LastEditTime: 2025-11-25 14:27:52
+LastEditors: weihua hu
+Description: 
+'''
 # src/server/mcp/tools/trade_tools.py
 """MCP tools for trade execution.
 Provides capabilities to execute orders via CCXT or other adapters.
@@ -19,7 +26,7 @@ def register_trade_tools(mcp: NacosMCP):
     """
 
     @mcp.tool()
-    def execute_order(
+    async def execute_order(
         symbol: str,
         side: str,
         type: str,
@@ -67,7 +74,7 @@ def register_trade_tools(mcp: NacosMCP):
         }
 
     @mcp.tool()
-    def get_account_balance(exchange_id: Optional[str] = None) -> Dict[str, Any]:
+    async def get_account_balance(exchange_id: Optional[str] = None) -> Dict[str, Any]:
         """Get account balance.
 
         Args:

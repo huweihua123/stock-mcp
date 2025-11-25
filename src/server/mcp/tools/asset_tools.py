@@ -22,7 +22,7 @@ def register_asset_tools(mcp: NacosMCP):
     """
 
     @mcp.tool()
-    def search_assets(
+    async def search_assets(
         query: str, asset_types: list[str] = None, limit: int = 10
     ) -> List[Dict[str, Any]]:
         """Search for assets (stocks, ETFs, crypto, etc.).
@@ -51,7 +51,7 @@ def register_asset_tools(mcp: NacosMCP):
                 query=query, asset_types=types if types else None, limit=limit
             )
 
-            results = manager.search_assets(search_query)
+            results = await manager.search_assets(search_query)
             return [r.model_dump(mode="json") for r in results]
 
         except Exception as e:
@@ -59,7 +59,7 @@ def register_asset_tools(mcp: NacosMCP):
             return [{"error": str(e)}]
 
     @mcp.tool()
-    def get_asset_info(ticker: str) -> Dict[str, Any]:
+    async def get_asset_info(ticker: str) -> Dict[str, Any]:
         """Get detailed asset information.
 
         Args:
@@ -72,7 +72,7 @@ def register_asset_tools(mcp: NacosMCP):
             manager = Container.adapter_manager()
             logger.info("MCP tool called: get_asset_info", ticker=ticker)
 
-            asset = manager.get_asset_info(ticker)
+            asset = await manager.get_asset_info(ticker)
             if asset:
                 return asset.model_dump(mode="json")
             return {"error": f"Asset not found: {ticker}"}
@@ -82,7 +82,7 @@ def register_asset_tools(mcp: NacosMCP):
             return {"error": str(e)}
 
     @mcp.tool()
-    def get_real_time_price(ticker: str) -> Dict[str, Any]:
+    async def get_real_time_price(ticker: str) -> Dict[str, Any]:
         """Get real-time price for an asset.
 
         Args:
@@ -95,7 +95,7 @@ def register_asset_tools(mcp: NacosMCP):
             manager = Container.adapter_manager()
             logger.info("MCP tool called: get_real_time_price", ticker=ticker)
 
-            price = manager.get_real_time_price(ticker)
+            price = await manager.get_real_time_price(ticker)
             if price:
                 return price.to_dict()
             return {"error": f"Price not found for {ticker}"}
@@ -105,7 +105,7 @@ def register_asset_tools(mcp: NacosMCP):
             return {"error": str(e)}
 
     @mcp.tool()
-    def get_multiple_prices(tickers: list[str]) -> Dict[str, Any]:
+    async def get_multiple_prices(tickers: list[str]) -> Dict[str, Any]:
         """Get real-time prices for multiple assets.
 
         Args:
@@ -118,7 +118,7 @@ def register_asset_tools(mcp: NacosMCP):
             manager = Container.adapter_manager()
             logger.info("MCP tool called: get_multiple_prices", count=len(tickers))
 
-            prices = manager.get_multiple_prices(tickers)
+            prices = await manager.get_multiple_prices(tickers)
             result = {}
             for ticker, price in prices.items():
                 if price:
@@ -132,7 +132,7 @@ def register_asset_tools(mcp: NacosMCP):
             return {"error": str(e)}
 
     @mcp.tool()
-    def get_historical_prices(
+    async def get_historical_prices(
         ticker: str, start_date: str, end_date: str, interval: str = "1d"
     ) -> List[Dict[str, Any]]:
         """Get historical price data.
@@ -158,7 +158,7 @@ def register_asset_tools(mcp: NacosMCP):
             start = datetime.strptime(start_date, "%Y-%m-%d")
             end = datetime.strptime(end_date, "%Y-%m-%d")
 
-            prices = manager.get_historical_prices(
+            prices = await manager.get_historical_prices(
                 ticker=ticker,
                 start_date=start,
                 end_date=end,
@@ -171,7 +171,7 @@ def register_asset_tools(mcp: NacosMCP):
             return [{"error": str(e)}]
 
     @mcp.tool()
-    def get_market_report(symbol: str) -> Dict[str, Any]:
+    async def get_market_report(symbol: str) -> Dict[str, Any]:
         """Get a comprehensive market report for the given ticker.
         Includes current price and asset info.
 
@@ -185,14 +185,27 @@ def register_asset_tools(mcp: NacosMCP):
             manager = Container.adapter_manager()
             logger.info("MCP tool called: get_market_report", symbol=symbol)
 
-            # Fetch info and price sequentially (now synchronous)
-            info = manager.get_asset_info(symbol)
-            price = manager.get_real_time_price(symbol)
+            # Fetch info and price concurrently
+            import asyncio
+
+            info, price = await asyncio.gather(
+                manager.get_asset_info(symbol),
+                manager.get_real_time_price(symbol),
+                return_exceptions=True,
+            )
 
             return {
                 "symbol": symbol,
-                "info": info.model_dump(mode="json") if info else None,
-                "price": price.to_dict() if price else None,
+                "info": (
+                    info.model_dump(mode="json")
+                    if info and not isinstance(info, Exception)
+                    else None
+                ),
+                "price": (
+                    price.to_dict()
+                    if price and not isinstance(price, Exception)
+                    else None
+                ),
                 "timestamp": datetime.now().isoformat(),
             }
         except Exception as e:

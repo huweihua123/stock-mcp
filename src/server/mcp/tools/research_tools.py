@@ -29,7 +29,7 @@ def register_research_tools(mcp: NacosMCP):
     """
 
     @mcp.tool()
-    def perform_deep_research(symbol: str, days_back: int = 30) -> Dict[str, Any]:
+    async def perform_deep_research(symbol: str, days_back: int = 30) -> Dict[str, Any]:
         """Generate a deep research report for `symbol`.
 
         Aggregates:
@@ -52,44 +52,51 @@ def register_research_tools(mcp: NacosMCP):
         fundamental_srv = Container.fundamental_service()
         news_srv = Container.news_service()
 
-        def get_market_data():
+        async def get_market_data():
             try:
                 end = datetime.now()
                 start = end - timedelta(days=365)
 
-                price = manager.get_real_time_price(symbol)
-                history = manager.get_historical_prices(symbol, start, end)
-                info = manager.get_asset_info(symbol)
+                price = await manager.get_real_time_price(symbol)
+                history = await manager.get_historical_prices(symbol, start, end)
+                info = await manager.get_asset_info(symbol)
 
                 return {
                     "info": info.model_dump(mode="json") if info else None,
                     "price": price.to_dict() if price else None,
-                    "history": [p.to_dict() for p in history] if history else [],
+                    "history": ([p.to_dict() for p in history] if history else []),
                 }
             except Exception as e:
                 logger.error(f"Market data fetch failed: {e}")
                 return {"error": str(e)}
 
-        def get_fundamentals():
-            return fundamental_srv.get_fundamental_analysis(symbol)
+        async def get_fundamentals():
+            return await fundamental_srv.get_fundamental_analysis(symbol)
 
-        def get_news():
-            return news_srv.fetch_latest_news(symbol, days_back)
+        async def get_news():
+            return await news_srv.fetch_latest_news(symbol, days_back)
 
-        def run_research():
-            # 同步依次调用，不再使用 asyncio.gather
-            market_data = get_market_data()
-            fundamentals = get_fundamentals()
-            news = get_news()
+        # 使用 asyncio.gather 并发执行
+        import asyncio
 
-            return {
-                "symbol": symbol,
-                "timestamp": datetime.now().isoformat(),
-                "market_data": market_data,
-                "fundamentals": fundamentals,
-                "news": news,
-            }
+        market_data, fundamentals, news = await asyncio.gather(
+            get_market_data(), get_fundamentals(), get_news(), return_exceptions=True
+        )
 
-        return run_research()
+        return {
+            "symbol": symbol,
+            "timestamp": datetime.now().isoformat(),
+            "market_data": (
+                market_data
+                if not isinstance(market_data, Exception)
+                else {"error": str(market_data)}
+            ),
+            "fundamentals": (
+                fundamentals
+                if not isinstance(fundamentals, Exception)
+                else {"error": str(fundamentals)}
+            ),
+            "news": news if not isinstance(news, Exception) else {"error": str(news)},
+        }
 
     logger.info("✅ Registered 1 research tool for Nacos MCP")

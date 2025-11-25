@@ -1,9 +1,18 @@
+"""
+Author: weihua hu
+Date: 2025-11-25 01:44:44
+LastEditTime: 2025-11-25 14:39:49
+LastEditors: weihua hu
+Description:
+"""
+
 # src/server/mcp/tools/news_tools.py
 """MCP tools for news data.
 Provides get_stock_news and search_news.
 Returns structured data (JSON).
 """
 
+import time
 from typing import Any, Dict, List, Literal, Optional
 
 from nacos_mcp_wrapper.server.nacos_mcp import NacosMCP
@@ -20,7 +29,7 @@ def register_news_tools(mcp: NacosMCP):
     """
 
     @mcp.tool()
-    def get_stock_news(symbol: str, days_back: int = 7) -> Dict[str, Any]:
+    async def get_stock_news(symbol: str, days_back: int = 7) -> Dict[str, Any]:
         """Get professional stock news.
 
         Args:
@@ -30,12 +39,43 @@ def register_news_tools(mcp: NacosMCP):
         Returns:
             Dictionary containing news items
         """
-        service = Container.news_service()
-        logger.info("MCP tool: get_stock_news", symbol=symbol, days_back=days_back)
-        return service.fetch_latest_news(symbol, days_back)
+        start_time = time.time()
+
+        logger.info("=" * 70)
+        logger.info("🔧 [get_stock_news] 工具调用开始")
+        logger.info("=" * 70)
+        logger.info(f"参数: symbol={symbol}, days_back={days_back}")
+
+        try:
+            service = Container.news_service()
+            logger.info("✅ NewsService 实例已获取")
+
+            logger.info(f"📞 调用 fetch_latest_news({symbol}, {days_back})")
+            result = await service.fetch_latest_news(symbol, days_back)
+
+            elapsed = (time.time() - start_time) * 1000
+            logger.info("-" * 70)
+            logger.info("✅ [get_stock_news] 执行成功")
+            logger.info(f"耗时: {elapsed:.2f}ms")
+            logger.info(f"结果类型: {type(result)}")
+            if isinstance(result, dict):
+                logger.info(f"结果键: {list(result.keys())}")
+            logger.info("=" * 70)
+
+            return result
+
+        except Exception as e:
+            elapsed = (time.time() - start_time) * 1000
+            logger.error("=" * 70)
+            logger.error("❌ [get_stock_news] 执行失败")
+            logger.error(f"耗时: {elapsed:.2f}ms")
+            logger.error(f"错误类型: {type(e).__name__}")
+            logger.error(f"错误信息: {str(e)}")
+            logger.error("=" * 70)
+            raise
 
     @mcp.tool()
-    def search_news(
+    async def search_news(
         query: Optional[str] = None,
         news_type: Literal[
             "general", "breaking", "financial", "stock", "sector"
@@ -73,20 +113,20 @@ def register_news_tools(mcp: NacosMCP):
         )
 
         if news_type == "general":
-            return service.web_search(query)
+            return await service.web_search(query)
         elif news_type == "breaking":
-            return service.get_breaking_news()
+            return await service.get_breaking_news()
         elif news_type == "financial":
-            return service.get_financial_news(ticker, sector)
+            return await service.get_financial_news(ticker, sector)
         elif news_type == "stock":
             from datetime import datetime
 
             today = datetime.now().strftime("%Y-%m-%d")
             search_query = f"{ticker} stock news latest {today}"
-            return service.web_search(search_query)
+            return await service.web_search(search_query)
         elif news_type == "sector":
             search_query = f"{sector} sector industry news latest"
-            return service.web_search(search_query)
+            return await service.web_search(search_query)
 
         return [{"error": "Unsupported news_type"}]
 

@@ -20,7 +20,7 @@ def register_fundamental_tools(mcp: NacosMCP):
     """
 
     @mcp.tool()
-    def get_financial_report(symbol: str) -> Dict[str, Any]:
+    async def get_financial_report(symbol: str) -> Dict[str, Any]:
         """Get financial report for the given ticker.
 
         Args:
@@ -36,7 +36,7 @@ def register_fundamental_tools(mcp: NacosMCP):
         ticker = _normalize_ticker(symbol)
         logger.info(f"Normalized ticker: {symbol} -> {ticker}")
 
-        return service.get_fundamental_analysis(ticker)
+        return await service.get_fundamental_analysis(ticker)
 
     logger.info("✅ Registered 1 fundamental tool for Nacos MCP")
 

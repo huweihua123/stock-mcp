@@ -11,14 +11,38 @@ Description:
 Main MCP server application with Nacos auto-registration.
 """
 
+from contextlib import asynccontextmanager
+
 import structlog
 
 from nacos_mcp_wrapper.server.nacos_mcp import NacosMCP
 from nacos_mcp_wrapper.server.nacos_settings import NacosSettings
 
 from src.server.config.settings import get_settings
+from src.server.core.dependencies import Container
+
+# Apply monkey patch for MCP initialization issue
+# See: https://github.com/modelcontextprotocol/python-sdk/issues/423
+from src.server.mcp import monkey_patch  # noqa: F401
 
 logger = structlog.get_logger(__name__)
+
+
+@asynccontextmanager
+async def mcp_lifespan(mcp: NacosMCP):
+    """MCP server lifespan - manages cleanup on shutdown.
+
+    Note: Dependencies are pre-initialized in main() before server starts,
+    so this only handles cleanup.
+    """
+    # Dependencies already initialized in main()
+    yield
+
+    # Shutdown
+    logger.info("🛑 Shutting down MCP server")
+    redis = Container.redis()
+    await redis.disconnect()
+    logger.info("✅ Redis connection closed")
 
 
 def create_nacos_mcp_server() -> NacosMCP:
@@ -37,11 +61,13 @@ def create_nacos_mcp_server() -> NacosMCP:
     nacos_settings.PASSWORD = settings.nacos.password
 
     # 创建 Nacos MCP 实例
+    # port is passed via **settings, not as a direct parameter
     mcp = NacosMCP(
         name=settings.nacos.mcp_server_name,
         nacos_settings=nacos_settings,
         version=settings.nacos.mcp_server_version,
-        port=settings.nacos.mcp_server_port,
+        port=settings.nacos.mcp_server_port,  # Passed to FastMCP via **settings
+        host="0.0.0.0",  # Bind to all interfaces
     )
 
     logger.info("📦 Registering tools to Nacos MCP server...")
@@ -107,9 +133,63 @@ def create_app():
     return mcp
 
 
+async def initialize_dependencies():
+    """Initialize all dependencies before starting the server."""
+    logger.info("🔧 Pre-initializing dependencies...")
+
+    # Initialize Redis
+    redis = Container.redis()
+    await redis.connect()
+    logger.info("✅ Redis connection established")
+
+    # Initialize Tushare connection
+    tushare = Container.tushare()
+    tushare_connected = await tushare.connect()
+    if tushare_connected:
+        logger.info("✅ Tushare connection established")
+    else:
+        logger.warning("⚠️ Tushare connection failed - will use fallback adapters")
+
+    # Initialize FinnHub connection
+    finnhub = Container.finnhub()
+    await finnhub.connect()
+    logger.info("✅ FinnHub connection established")
+
+    # Initialize Baostock connection
+    baostock = Container.baostock()
+    await baostock.connect()
+    logger.info("✅ Baostock connection established")
+
+    # Register adapters
+    logger.info("📦 Registering data adapters...")
+    adapter_manager = Container.adapter_manager()
+
+    # A股数据源 - 按优先级注册
+    adapter_manager.register_adapter(Container.tushare_adapter())
+    adapter_manager.register_adapter(Container.akshare_adapter())
+    adapter_manager.register_adapter(Container.baostock_adapter())
+
+    # 美股数据源
+    adapter_manager.register_adapter(Container.yahoo_adapter())
+    adapter_manager.register_adapter(Container.finnhub_adapter())
+
+    # 加密货币数据源
+    adapter_manager.register_adapter(Container.ccxt_adapter())
+    adapter_manager.register_adapter(Container.crypto_adapter())
+
+    logger.info("✅ All adapters registered\n")
+
+
 def main():
     """Main entry point."""
+    import asyncio
+
     settings = get_settings()
+
+    # Pre-initialize all dependencies synchronously BEFORE creating server
+    asyncio.run(initialize_dependencies())
+
+    # Now create the MCP server
     mcp = create_app()
 
     if mcp is None:
