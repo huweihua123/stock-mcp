@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 from src.server.core.dependencies import Container
 from src.server.domain.services.filings_service import FilingsService
-from src.server.domain.sec_filing_schema import get_filing_schema
+
 
 router = APIRouter(prefix="/filings", tags=["filings"])
 
@@ -187,8 +187,10 @@ async def get_document_chunks_stream(
 ):
     """Get SEC filing semantic chunks with item labels (Streaming NDJSON).
     
-    Uses edgartools' ChunkedDocument for intelligent chunking based on document structure.
-    Each chunk includes rich metadata for precise RAG filtering.
+    Uses the Strategy Pattern via ChunkingOrchestrator to handle different filing types:
+    - 10-K/10-Q/20-F: Structured item-based chunking
+    - 6-K: Attachment extraction (EX-99.1)
+    - 8-K: Event-driven section chunking
     
     Returns NDJSON (Newline Delimited JSON) format for streaming:
     - First line: {"type": "header", "doc_id": "...", "ticker": "...", "form": "...", "filing_date": "..."}
@@ -201,14 +203,12 @@ async def get_document_chunks_stream(
         items: Optional list of items to extract. Defaults to important sections.
     """
     from fastapi.responses import StreamingResponse
-    from edgar import Company, set_identity
     from src.server.utils.logger import logger
+    from src.server.domain.chunking import ChunkingOrchestrator
     import json
     
-    set_identity("ValueCell Agent <contact@valuecell.ai>")
-    
     async def generate_chunks():
-        """Generator for streaming NDJSON chunks."""
+        """Generator for streaming NDJSON chunks using ChunkingOrchestrator."""
         try:
             # Extract pure symbol
             pure_symbol = ticker.split(":")[-1] if ":" in ticker else ticker
@@ -216,8 +216,9 @@ async def get_document_chunks_stream(
             
             logger.info(f"🔍 get_document_chunks (stream): ticker={pure_symbol}, doc_id={accession_number}")
             
-            # Get the filing using edgartools
-            company = Company(pure_symbol)
+            # Get the filing using edgartools via sec_utils (avoids ticker.txt download)
+            from src.server.utils.sec_utils import get_company
+            company = get_company(pure_symbol)
             filings = company.get_filings().latest(100)
             
             target_filing = None
@@ -236,146 +237,32 @@ async def get_document_chunks_stream(
             
             logger.info(f"📄 Found filing: {target_filing.form} dated {target_filing.filing_date}")
             
-            # Send header first
-            yield json.dumps({
-                "type": "header",
-                "doc_id": accession_number,
-                "ticker": pure_symbol,
-                "form": target_filing.form,
-                "filing_date": str(target_filing.filing_date)
-            }) + "\n"
+            # Normalize items parameter
+            items_to_extract = None
+            if items and len(items) > 0 and items[0]:
+                items_to_extract = items
             
-            # Get ChunkedDocument
-            chunked_doc = None
-            try:
-                filing_obj = target_filing.obj()
-                if hasattr(filing_obj, 'doc') and filing_obj.doc is not None:
-                    chunked_doc = filing_obj.doc
-            except Exception as e:
-                logger.warning(f"Failed to get ChunkedDocument: {e}")
+            # Use ChunkingOrchestrator with Strategy Pattern
+            # This delegates to the appropriate strategy based on form type:
+            # - TenKStrategy for 10-K/10-Q/20-F
+            # - SixKStrategy for 6-K (attachment extraction)
+            # - EightKStrategy for 8-K
+            chunk_count = 0
+            for item in ChunkingOrchestrator.process_with_header_footer(
+                filing=target_filing,
+                ticker=pure_symbol,
+                items=items_to_extract,
+            ):
+                if item["type"] == "chunk":
+                    chunk_count += 1
+                yield json.dumps(item) + "\n"
             
-            # Get Schema based on form type
-            schema = get_filing_schema(target_filing.form)
-            item_names = schema.mapping
-            
-            total_chunk_index = 0
-            
-            if chunked_doc:
-                # 使用 as_dataframe() 获取带完整标签的 chunks
-                try:
-                    df = chunked_doc.as_dataframe()
-                    logger.info(f"📊 DataFrame loaded: {len(df)} rows, columns: {df.columns.tolist()}")
-                    
-                    # 定义要过滤的 items
-                    items_to_extract = items if items and len(items) > 0 and items[0] else schema.default_items
-                    
-                    # 过滤 DataFrame
-                    # 1. 过滤掉 Empty 的 chunks
-                    # 2. 只保留指定的 Items（如果有指定）
-                    if 'Empty' in df.columns:
-                        df = df[~df['Empty']]
-                    
-                    if 'Item' in df.columns and items_to_extract:
-                        df = df[df['Item'].isin(items_to_extract)]
-                    
-                    logger.info(f"📦 After filtering: {len(df)} chunks for items {items_to_extract}")
-                    
-                    # 遍历 DataFrame 流式输出
-                    for idx, row in df.iterrows():
-                        # 获取文本内容
-                        text = row.get('Text', '') or ''
-                        if not text.strip():
-                            continue
-                        
-                        # 获取 Item 标签
-                        item = row.get('Item', 'unknown')
-                        
-                        # 构建丰富的元数据
-                        metadata = {
-                            "ticker": pure_symbol,
-                            "doc_id": accession_number,
-                            "form": target_filing.form,
-                            "item": item,
-                            "item_name": item_names.get(item, item),
-                            "filing_date": str(target_filing.filing_date),
-                            "chunk_index": total_chunk_index,
-                            # 额外的标签信息
-                            "is_table": bool(row.get('Table', False)),
-                            "char_count": int(row.get('Chars', len(text))),
-                            "is_signature": bool(row.get('Signature', False)),
-                        }
-                        
-                        yield json.dumps({
-                            "type": "chunk",
-                            "text": text.strip(),
-                            "metadata": metadata
-                        }) + "\n"
-                        total_chunk_index += 1
-                        
-                except Exception as e:
-                    logger.error(f"Failed to process DataFrame: {e}")
-                    import traceback
-                    logger.error(traceback.format_exc())
-            else:
-                # Fallback: markdown chunking
-                logger.warning("ChunkedDocument not available, using markdown fallback")
-                try:
-                    markdown_content = target_filing.markdown()
-                    if markdown_content:
-                        paragraphs = markdown_content.split("\n\n")
-                        TARGET_SIZE = 4000
-                        current_chunk = ""
-                        
-                        for para in paragraphs:
-                            if len(current_chunk) + len(para) > TARGET_SIZE and current_chunk:
-                                yield json.dumps({
-                                    "type": "chunk",
-                                    "text": current_chunk.strip(),
-                                    "metadata": {
-                                        "ticker": pure_symbol,
-                                        "doc_id": accession_number,
-                                        "form": target_filing.form,
-                                        "item": "fallback",
-                                        "item_name": "Fallback Chunking",
-                                        "filing_date": str(target_filing.filing_date),
-                                        "chunk_index": total_chunk_index,
-                                    }
-                                }) + "\n"
-                                total_chunk_index += 1
-                                current_chunk = para
-                            else:
-                                current_chunk += "\n\n" + para if current_chunk else para
-                        
-                        # Last chunk
-                        if current_chunk.strip():
-                            yield json.dumps({
-                                "type": "chunk",
-                                "text": current_chunk.strip(),
-                                "metadata": {
-                                    "ticker": pure_symbol,
-                                    "doc_id": accession_number,
-                                    "form": target_filing.form,
-                                    "item": "fallback",
-                                    "item_name": "Fallback Chunking",
-                                    "filing_date": str(target_filing.filing_date),
-                                    "chunk_index": total_chunk_index,
-                                }
-                            }) + "\n"
-                            total_chunk_index += 1
-                except Exception as e:
-                    logger.error(f"Fallback chunking failed: {e}")
-            
-            logger.info(f"✅ Streamed {total_chunk_index} chunks")
-            
-            # Send footer
-            yield json.dumps({
-                "type": "footer",
-                "chunks_count": total_chunk_index,
-                "status": "success"
-            }) + "\n"
+            logger.info(f"✅ Streamed {chunk_count} chunks via ChunkingOrchestrator")
             
         except Exception as e:
             logger.error(f"Streaming chunks failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             yield json.dumps({
                 "type": "error",
                 "error": str(e)

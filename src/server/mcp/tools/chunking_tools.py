@@ -104,9 +104,7 @@ def register_chunking_tools(mcp: FastMCP):
             }
         """
         try:
-            from edgar import Company, set_identity
-            
-            set_identity("ValueCell Agent <contact@valuecell.ai>")
+            from src.server.utils.sec_utils import get_company
             
             # Extract pure symbol from EXCHANGE:SYMBOL format
             pure_symbol = ticker.split(":")[-1] if ":" in ticker else ticker
@@ -114,8 +112,8 @@ def register_chunking_tools(mcp: FastMCP):
             
             logger.info(f"🔍 get_document_chunks: ticker={pure_symbol}, doc_id={accession_number}")
             
-            # 1. Get the filing using edgartools
-            company = Company(pure_symbol)
+            # 1. Get the filing using edgartools via sec_utils (avoids ticker.txt download)
+            company = get_company(pure_symbol)
             
             # Search for the specific filing by accession number
             filings = company.get_filings().latest(100)

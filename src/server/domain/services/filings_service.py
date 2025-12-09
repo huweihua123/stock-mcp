@@ -18,23 +18,11 @@ class FilingsService:
         self.minio_client = minio_client
         self.logger = logger
         
-        # Initialize edgartools identity
-        from edgar import set_identity
-        set_identity("ValueCell Agent <contact@valuecell.ai>")
-
-    def _extract_symbol(self, ticker: str) -> str:
-        """Extract pure symbol from EXCHANGE:SYMBOL format.
+        # Initialize edgartools identity and cache via sec_utils
+        # This ensures consistent identity and avoids ticker.txt downloads
+        from src.server.utils.sec_utils import get_company, get_cik_or_symbol
         
-        Args:
-            ticker: Symbol in format 'EXCHANGE:SYMBOL' (e.g., 'NASDAQ:AAPL') or pure symbol
-            
-        Returns:
-            Pure symbol (e.g., 'AAPL' from 'NASDAQ:AAPL')
-        """
-        if ':' in ticker:
-            _, symbol = ticker.split(':', 1)
-            return symbol
-        return ticker
+        # No need to call set_identity here, sec_utils handles it on import
 
     async def fetch_periodic_sec_filings(
         self,
@@ -180,11 +168,10 @@ class FilingsService:
                 pure_symbol = self._extract_symbol(ticker)
                 self.logger.info(f"Processing SEC filing for {ticker} (pure symbol: {pure_symbol})")
                 
-                # Use edgartools to fetch and parse
-                from edgar import Company
-                
-                # 1. Initialize Company with pure symbol
-                company = Company(pure_symbol)
+                # 1. Initialize Company using sec_utils (avoids ticker.txt download)
+                from src.server.utils.sec_utils import get_company
+                self.logger.info(f"Initializing Company for: {pure_symbol}")
+                company = get_company(pure_symbol)
                 
                 # 2. Find the specific filing
                 # edgartools doesn't support get_by_accession directly, so we fetch recent filings and filter
@@ -393,10 +380,10 @@ class FilingsService:
             
             self.logger.info(f"📥 Cache MISS for {ticker}/{doc_id}, fetching from SEC...")
             
-            # 2. Fetch from SEC using edgartools
-            from edgar import Company
+            # 2. Fetch from SEC using edgartools via sec_utils
+            from src.server.utils.sec_utils import get_company
             
-            company = Company(pure_symbol)
+            company = get_company(pure_symbol)
             
             # Search for the filing by accession number
             filings = company.get_filings().latest(50)
