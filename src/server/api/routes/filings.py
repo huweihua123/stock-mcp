@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from src.server.core.dependencies import Container
 from src.server.domain.services.filings_service import FilingsService
+from src.server.domain.sec_filing_schema import get_filing_schema
 
 router = APIRouter(prefix="/filings", tags=["filings"])
 
@@ -253,21 +254,9 @@ async def get_document_chunks_stream(
             except Exception as e:
                 logger.warning(f"Failed to get ChunkedDocument: {e}")
             
-            # Item names mapping
-            item_names = {
-                "Item 1": "Business",
-                "Item 1A": "Risk Factors",
-                "Item 1B": "Unresolved Staff Comments",
-                "Item 1C": "Cybersecurity",
-                "Item 2": "Properties",
-                "Item 3": "Legal Proceedings",
-                "Item 5": "Market for Common Equity",
-                "Item 6": "Selected Financial Data",
-                "Item 7": "MD&A",
-                "Item 7A": "Quantitative Disclosures",
-                "Item 8": "Financial Statements",
-                "Item 9A": "Controls and Procedures",
-            }
+            # Get Schema based on form type
+            schema = get_filing_schema(target_filing.form)
+            item_names = schema.mapping
             
             total_chunk_index = 0
             
@@ -278,8 +267,7 @@ async def get_document_chunks_stream(
                     logger.info(f"📊 DataFrame loaded: {len(df)} rows, columns: {df.columns.tolist()}")
                     
                     # 定义要过滤的 items
-                    default_items = ["Item 1", "Item 1A", "Item 7", "Item 7A", "Item 8"]
-                    items_to_extract = items if items and len(items) > 0 and items[0] else default_items
+                    items_to_extract = items if items and len(items) > 0 and items[0] else schema.default_items
                     
                     # 过滤 DataFrame
                     # 1. 过滤掉 Empty 的 chunks
