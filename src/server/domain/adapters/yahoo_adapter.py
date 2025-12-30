@@ -39,15 +39,20 @@ class YahooAdapter(BaseDataAdapter):
         self.proxy_url = proxy_url or "http://127.0.0.1:7890"
 
         # Configure proxy
+        # yfinance 1.0+ uses curl_cffi which requires proxy as dict format
         if self.proxy_url:
             try:
-                yf.set_config(proxy=self.proxy_url)
+                proxy_dict = {
+                    "http": self.proxy_url,
+                    "https": self.proxy_url,
+                }
+                yf.config.network.proxy = proxy_dict
                 self.logger.info(
-                    f"✅ Yahoo adapter configured with proxy (yf.set_config): {self.proxy_url}"
+                    f"✅ Yahoo adapter configured with proxy (yf.config.network.proxy): {self.proxy_url}"
                 )
-            except AttributeError:
+            except Exception as e:
+                self.logger.warning(f"⚠️  Failed to set proxy via yf.config: {e}, trying env vars...")
                 import os
-
                 os.environ["HTTP_PROXY"] = self.proxy_url
                 os.environ["HTTPS_PROXY"] = self.proxy_url
                 os.environ["http_proxy"] = self.proxy_url
@@ -219,7 +224,13 @@ class YahooAdapter(BaseDataAdapter):
             ticker_obj = await self._run(yf.Ticker, ticker_norm)
             info = await self._run(lambda: ticker_obj.info)
 
-            if not info or "symbol" not in info:
+            # yfinance 1.0 may return string or None instead of dict
+            if not info or not isinstance(info, dict):
+                self.logger.warning(f"Invalid info type for {ticker}: {type(info)}")
+                return None
+
+            if "symbol" not in info:
+                self.logger.warning(f"No symbol in info for {ticker}")
                 return None
 
             # Map Yahoo info to Asset model
@@ -269,46 +280,68 @@ class YahooAdapter(BaseDataAdapter):
 
         try:
             ticker_obj = await self._run(yf.Ticker, ticker_norm)
-            info = await self._run(lambda: ticker_obj.info)
-
-            price = (
-                info.get("currentPrice")
-                or info.get("regularMarketPrice")
-                or info.get("ask")
-            )
+            
+            # Try fast_info first (more stable in yfinance 1.0)
+            price = None
+            currency = "USD"
+            volume = 0
+            open_price = None
+            high_price = None
+            low_price = None
+            close_price = None
+            market_cap = None
+            
+            try:
+                fast_info = await self._run(lambda: ticker_obj.fast_info)
+                if fast_info:
+                    price = getattr(fast_info, 'last_price', None)
+                    currency = getattr(fast_info, 'currency', 'USD') or 'USD'
+                    volume = getattr(fast_info, 'last_volume', 0) or 0
+                    open_price = getattr(fast_info, 'open', None)
+                    high_price = getattr(fast_info, 'day_high', None)
+                    low_price = getattr(fast_info, 'day_low', None)
+                    close_price = getattr(fast_info, 'previous_close', None)
+                    market_cap = getattr(fast_info, 'market_cap', None)
+            except Exception as fast_info_error:
+                self.logger.debug(f"fast_info failed for {ticker}, trying info: {fast_info_error}")
+            
+            # Fallback to info if fast_info didn't get price
+            if price is None:
+                info = await self._run(lambda: ticker_obj.info)
+                
+                # yfinance 1.0 may return string or None instead of dict
+                if info and isinstance(info, dict):
+                    price = (
+                        info.get("currentPrice")
+                        or info.get("regularMarketPrice")
+                        or info.get("ask")
+                    )
+                    if price is not None:
+                        currency = info.get("currency", "USD") or "USD"
+                        volume = info.get("volume", 0) or 0
+                        open_price = info.get("open")
+                        high_price = info.get("dayHigh")
+                        low_price = info.get("dayLow")
+                        close_price = info.get("previousClose")
+                        market_cap = info.get("marketCap")
 
             if price is None:
+                self.logger.warning(f"No price available for {ticker}")
                 return None
 
             asset_price = AssetPrice(
                 ticker=ticker,
                 price=Decimal(str(price)),
-                currency=info.get("currency", "USD"),
+                currency=currency,
                 timestamp=datetime.utcnow(),
-                volume=Decimal(str(info.get("volume", 0))),
-                open_price=(
-                    Decimal(str(info.get("open", 0))) if info.get("open") else None
-                ),
-                high_price=(
-                    Decimal(str(info.get("dayHigh", 0)))
-                    if info.get("dayHigh")
-                    else None
-                ),
-                low_price=(
-                    Decimal(str(info.get("dayLow", 0))) if info.get("dayLow") else None
-                ),
-                close_price=(
-                    Decimal(str(info.get("previousClose", 0)))
-                    if info.get("previousClose")
-                    else None
-                ),
+                volume=Decimal(str(volume)) if volume else Decimal("0"),
+                open_price=Decimal(str(open_price)) if open_price else None,
+                high_price=Decimal(str(high_price)) if high_price else None,
+                low_price=Decimal(str(low_price)) if low_price else None,
+                close_price=Decimal(str(close_price)) if close_price else None,
                 change=None,  # Calculate if needed
                 change_percent=None,
-                market_cap=(
-                    Decimal(str(info.get("marketCap", 0)))
-                    if info.get("marketCap")
-                    else None
-                ),
+                market_cap=Decimal(str(market_cap)) if market_cap else None,
                 source=DataSource.YAHOO,
             )
 
@@ -349,6 +382,11 @@ class YahooAdapter(BaseDataAdapter):
             hist = await self._run(
                 ticker_obj.history, start=start_str, end=end_str, interval=interval
             )
+
+            # yfinance 1.0 may return None
+            if hist is None:
+                self.logger.warning(f"history() returned None for {ticker}")
+                return []
 
             if hist.empty:
                 return []
