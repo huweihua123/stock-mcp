@@ -95,9 +95,13 @@
    ```
    
    编辑 `.env` 添加你的 API 密钥（可选，但推荐以获得更高限额）:
+   - `TUSHARE_ENABLED` - 是否启用 Tushare 数据源（默认 False）
    - `TUSHARE_TOKEN` - 用于 A 股数据（[获取 Token](https://tushare.pro/register)）
+   - `FINNHUB_ENABLED` - 是否启用 Finnhub 数据源（默认 False）
    - `FINNHUB_API_KEY` - 用于美股机构数据（[获取 API Key](https://finnhub.io/)）
    - `DASHSCOPE_API_KEY` - 用于阿里百炼 AI（可选，用于测试）
+
+   > **💡 提示**: 本项目采用**可插拔设计**。如果没有配置 API Key，系统会自动禁用相应的数据源，并使用免费的替代方案（如 Akshare, Baostock, Yahoo Finance）作为后备。
 
 ### 🏃‍♂️ 使用方法
 
@@ -401,9 +405,13 @@ Optimized for LLM context windows:
    ```
    
    Edit `.env` to add your API keys (optional but recommended for higher limits):
+   - `TUSHARE_ENABLED` - Enable Tushare data source (default: False)
    - `TUSHARE_TOKEN` - For China A-shares data ([Get Token](https://tushare.pro/register))
+   - `FINNHUB_ENABLED` - Enable Finnhub data source (default: False)
    - `FINNHUB_API_KEY` - For US institutional data ([Get API Key](https://finnhub.io/))
    - `DASHSCOPE_API_KEY` - For Alibaba Cloud AI (optional, for testing)
+
+   > **💡 Note**: This project features a **pluggable design**. If API keys are not configured, the system will automatically disable the corresponding data sources and use free alternatives (like Akshare, Baostock, Yahoo Finance) as fallbacks.
 
 ### 🏃‍♂️ Usage
 
