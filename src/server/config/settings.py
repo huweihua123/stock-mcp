@@ -38,10 +38,22 @@ class MCPConfig(BaseAppSettings):
 
 class TushareConfig(BaseAppSettings):
     token: str = Field("", validation_alias="TUSHARE_TOKEN")
+    enabled: bool = Field(False, validation_alias="TUSHARE_ENABLED")
+    
+    @property
+    def is_available(self) -> bool:
+        """Check if Tushare is both enabled and has a valid token."""
+        return self.enabled and bool(self.token)
 
 
 class FinnhubConfig(BaseAppSettings):
     api_key: str = Field("", validation_alias="FINNHUB_API_KEY")
+    enabled: bool = Field(False, validation_alias="FINNHUB_ENABLED")
+
+    @property
+    def is_available(self) -> bool:
+        """Check if Finnhub is both enabled and has a valid API key."""
+        return self.enabled and bool(self.api_key)
 
 
 class BaostockConfig(BaseAppSettings):

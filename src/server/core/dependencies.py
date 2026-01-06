@@ -11,7 +11,7 @@ from src.server.infrastructure.connections.tushare_connection import TushareConn
 from src.server.infrastructure.connections.finnhub_connection import FinnhubConnection
 from src.server.infrastructure.connections.baostock_connection import BaostockConnection
 
-# Adapters (import lazily to avoid heavy imports at container init)
+# Adapters
 from src.server.domain.adapters.yahoo_adapter import YahooAdapter
 from src.server.domain.adapters.akshare_adapter import AkshareAdapter
 from src.server.domain.adapters.crypto_adapter import CryptoAdapter
@@ -76,6 +76,11 @@ class Container(containers.DeclarativeContainer):
     )
     baostock_adapter = providers.Singleton(
         BaostockAdapter, cache=cache
+    )
+    
+    from src.server.domain.adapters.edgar_adapter import EdgarAdapter
+    edgar_adapter = providers.Singleton(
+        EdgarAdapter, cache=cache
     )
 
     # Adapter manager

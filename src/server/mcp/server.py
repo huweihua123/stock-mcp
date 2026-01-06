@@ -37,18 +37,30 @@ async def mcp_lifespan(mcp: FastMCP):
     await redis.connect()
     logger.info("✅ Redis connection established")
 
-    # Initialize Tushare connection
-    tushare = Container.tushare()
-    tushare_connected = await tushare.connect()
-    if tushare_connected:
-        logger.info("✅ Tushare connection established")
+    # Get config
+    config = Container.config()
+    
+    # Initialize Tushare connection (only if enabled)
+    tushare_available = False
+    if config.tushare.is_available:
+        tushare = Container.tushare()
+        tushare_available = await tushare.connect()
+        if tushare_available:
+            logger.info("✅ Tushare connection established")
+        else:
+            logger.warning("⚠️ Tushare connection failed - will use fallback adapters")
     else:
-        logger.warning("⚠️ Tushare connection failed - will use fallback adapters")
+        logger.info("ℹ️  Tushare disabled (set TUSHARE_ENABLED=True and provide token to enable)")
 
-    # Initialize FinnHub connection
-    finnhub = Container.finnhub()
-    await finnhub.connect()
-    logger.info("✅ FinnHub connection established")
+    # Initialize FinnHub connection (only if enabled)
+    finnhub_available = False
+    if config.finnhub.is_available:
+        finnhub = Container.finnhub()
+        await finnhub.connect()
+        finnhub_available = True
+        logger.info("✅ FinnHub connection established")
+    else:
+        logger.info("ℹ️  FinnHub disabled (set FINNHUB_ENABLED=True and provide API key to enable)")
 
     # Initialize Baostock connection
     baostock = Container.baostock()
@@ -56,29 +68,26 @@ async def mcp_lifespan(mcp: FastMCP):
     logger.info("✅ Baostock connection established")
 
     # Register adapters
-    # Priority order for A-shares: Tushare (有token) > Akshare > Baostock
     logger.info("📦 Registering data adapters...")
     adapter_manager = Container.adapter_manager()
 
     # A股数据源 - 按优先级注册
-    adapter_manager.register_adapter(Container.tushare_adapter())
+    if tushare_available:
+        adapter_manager.register_adapter(Container.tushare_adapter())
     adapter_manager.register_adapter(Container.akshare_adapter())
     adapter_manager.register_adapter(Container.baostock_adapter())
 
-    # 加密货币数据源 - 优先级高于 Yahoo（避免被覆盖）
-    # 优先: CoinGecko (免费，数据准确，延迟低)
+    # 加密货币数据源
     adapter_manager.register_adapter(Container.crypto_adapter())
-    # 备选: CCXT (交易所直连，支持OHLCV)
     adapter_manager.register_adapter(Container.ccxt_adapter())
 
-    # 美股数据源（Yahoo 也支持加密货币，但优先级低）
+    # 美股数据源
     adapter_manager.register_adapter(Container.yahoo_adapter())
-    adapter_manager.register_adapter(Container.finnhub_adapter())
+    if finnhub_available:
+        adapter_manager.register_adapter(Container.finnhub_adapter())
 
     logger.info(
-        "✅ All adapters registered "
-        "(Crypto: CoinGecko > CCXT > Yahoo | "
-        "A-share: Tushare > Akshare > Baostock)"
+        f"✅ All adapters registered (A-share: {'Tushare > ' if tushare_available else ''}Akshare > Baostock)"
     )
 
     yield
