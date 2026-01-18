@@ -19,7 +19,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.server.mcp.server import create_mcp_server
 from src.server.core.health import router as health_router
-from src.server.api.routes import market_data_router, filings_router
+from src.server.api.routes import market_data_router, filings_router, news_router, fundamental_router
 from src.server.core.dependencies import Container
 from src.server.utils.logger import logger
 
@@ -209,11 +209,15 @@ def create_app():
     app.include_router(health_router, tags=["Health"])
     app.include_router(market_data_router, tags=["Market Data"])
     app.include_router(filings_router, prefix="/api/v1", tags=["Filings"])
+    app.include_router(news_router, tags=["News"])
+    app.include_router(fundamental_router, tags=["Fundamental"])
 
     logger.info("✅ RESTful API routes registered")
     logger.info("   - Health check: /health")
     logger.info("   - Market data: /api/v1/market/*")
     logger.info("   - Filings: /api/v1/filings/*")
+    logger.info("   - News: /api/v1/news/*")
+    logger.info("   - Fundamental: /api/v1/fundamental/*")
 
     # 6. Mount MCP protocol endpoint
     if mcp_app:

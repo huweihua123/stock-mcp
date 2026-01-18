@@ -4,20 +4,30 @@
 Provides RESTful HTTP endpoints for:
 - Batch price queries
 - Technical indicators calculation
+- Historical prices (K-line data)
+- Asset info and search
+- Trading signals
+- Support/resistance levels
 """
 
-from fastapi import APIRouter, HTTPException, status
-from typing import Dict, Any
+from fastapi import APIRouter, HTTPException, status, Query
+from typing import Dict, Any, List, Optional
+from datetime import datetime, timedelta
 from src.server.utils.logger import logger
 
 # 导入核心实现函数
 from src.server.mcp.tools.asset_tools import get_multiple_prices_impl
 from src.server.mcp.tools.technical_tools import calculate_technical_indicators_impl
+from src.server.core.dependencies import Container
 
 # 导入请求模型
 from src.server.api.models.requests import (
     GetMultiplePricesRequest,
-    CalculateTechnicalIndicatorsRequest
+    CalculateTechnicalIndicatorsRequest,
+    GetHistoricalPricesRequest,
+    SearchAssetsRequest,
+    GenerateTradingSignalRequest,
+    CalculateSupportResistanceRequest,
 )
 
 router = APIRouter(prefix="/api/v1/market", tags=["Market Data"])
@@ -241,3 +251,268 @@ async def calculate_technical_indicators(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to calculate indicators: {str(e)}"
         )
+
+
+# ============================================================
+# 新增 HTTP 端点
+# ============================================================
+
+@router.post(
+    "/prices/history",
+    summary="获取历史价格/K线数据",
+    description="""
+    获取指定资产的历史价格数据（K线数据）
+    
+    **参数说明:**
+    - `symbol`: 资产代码 (格式: EXCHANGE:SYMBOL)
+    - `period`: 时间周期 (7d, 30d, 90d, 1y)
+    - `interval`: K线间隔 (1d, 1h, 15m, 5m)
+    
+    **返回数据:**
+    - OHLCV 数据列表
+    """,
+)
+async def get_historical_prices(
+    request: GetHistoricalPricesRequest
+) -> Dict[str, Any]:
+    """获取历史价格数据"""
+    try:
+        logger.info(
+            "API: get_historical_prices called",
+            symbol=request.symbol,
+            period=request.period,
+            interval=request.interval
+        )
+        
+        manager = Container.adapter_manager()
+        
+        # 解析 period 为日期范围
+        period_days = _parse_period_to_days(request.period)
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=period_days)
+        
+        prices = await manager.get_historical_prices(
+            ticker=request.symbol,
+            start_date=start_date,
+            end_date=end_date,
+            interval=request.interval,
+        )
+        
+        result = {
+            "symbol": request.symbol,
+            "period": request.period,
+            "interval": request.interval,
+            "count": len(prices),
+            "data": [p.to_dict() for p in prices]
+        }
+        
+        logger.info(
+            "API: get_historical_prices completed",
+            symbol=request.symbol,
+            count=len(prices)
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"API error in get_historical_prices: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch historical prices: {str(e)}"
+        )
+
+
+@router.post(
+    "/asset/info",
+    summary="获取资产详情",
+    description="获取资产的详细信息，包括公司名称、行业、市值等",
+)
+async def get_asset_info(
+    symbol: str = Query(..., description="资产代码 (格式: EXCHANGE:SYMBOL)")
+) -> Dict[str, Any]:
+    """获取资产详细信息"""
+    try:
+        logger.info("API: get_asset_info called", symbol=symbol)
+        
+        manager = Container.adapter_manager()
+        asset = await manager.get_asset_info(symbol)
+        
+        if asset:
+            return asset.model_dump(mode="json")
+        return {"error": f"Asset not found: {symbol}"}
+        
+    except Exception as e:
+        logger.error(f"API error in get_asset_info: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get asset info: {str(e)}"
+        )
+
+
+@router.post(
+    "/asset/search",
+    summary="搜索资产",
+    description="根据关键词搜索资产（股票、ETF、加密货币等）",
+)
+async def search_assets(
+    request: SearchAssetsRequest
+) -> Dict[str, Any]:
+    """搜索资产"""
+    try:
+        logger.info(
+            "API: search_assets called",
+            query=request.query,
+            limit=request.limit
+        )
+        
+        from src.server.domain.types import AssetSearchQuery, AssetType
+        
+        manager = Container.adapter_manager()
+        
+        types = []
+        if request.asset_types:
+            for t in request.asset_types:
+                try:
+                    types.append(AssetType(t.lower()))
+                except ValueError:
+                    pass
+        
+        search_query = AssetSearchQuery(
+            query=request.query,
+            asset_types=types if types else None,
+            limit=request.limit
+        )
+        
+        results = await manager.search_assets(search_query)
+        
+        # Wrap list in a dict to match Java client expectation
+        return {
+            "results": [r.model_dump(mode="json") for r in results],
+            "count": len(results),
+            "query": request.query
+        }
+        
+    except Exception as e:
+        logger.error(f"API error in search_assets: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to search assets: {str(e)}"
+        )
+
+
+@router.post(
+    "/signals/trading",
+    summary="生成交易信号",
+    description="基于技术指标生成买入/卖出信号",
+)
+async def generate_trading_signal(
+    request: GenerateTradingSignalRequest
+) -> Dict[str, Any]:
+    """生成交易信号"""
+    try:
+        logger.info(
+            "API: generate_trading_signal called",
+            symbol=request.symbol,
+            period=request.period
+        )
+        
+        service = Container.technical_service()
+        result = await service.generate_trading_signal(
+            symbol=request.symbol,
+            period=request.period,
+            interval=request.interval
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"API error in generate_trading_signal: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate trading signal: {str(e)}"
+        )
+
+
+@router.post(
+    "/analysis/support-resistance",
+    summary="计算支撑阻力位",
+    description="计算资产的支撑位和阻力位",
+)
+async def calculate_support_resistance(
+    request: CalculateSupportResistanceRequest
+) -> Dict[str, Any]:
+    """计算支撑阻力位"""
+    try:
+        logger.info(
+            "API: calculate_support_resistance called",
+            symbol=request.symbol,
+            period=request.period
+        )
+        
+        service = Container.technical_service()
+        result = await service.calculate_support_resistance(
+            symbol=request.symbol,
+            period=request.period
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"API error in calculate_support_resistance: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to calculate support/resistance: {str(e)}"
+        )
+
+
+@router.post(
+    "/report",
+    summary="获取市场综合报告",
+    description="获取资产的综合市场报告，包括价格和基本信息",
+)
+async def get_market_report(
+    symbol: str = Query(..., description="资产代码")
+) -> Dict[str, Any]:
+    """获取综合市场报告"""
+    try:
+        logger.info("API: get_market_report called", symbol=symbol)
+        
+        import asyncio
+        manager = Container.adapter_manager()
+        
+        # 并行获取信息和价格
+        info, price = await asyncio.gather(
+            manager.get_asset_info(symbol),
+            manager.get_real_time_price(symbol)
+        )
+        
+        return {
+            "symbol": symbol,
+            "info": info.model_dump(mode="json") if info else None,
+            "price": price.to_dict() if price else None,
+            "timestamp": datetime.now().isoformat(),
+        }
+        
+    except Exception as e:
+        logger.error(f"API error in get_market_report: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get market report: {str(e)}"
+        )
+
+
+# ============================================================
+# 辅助函数
+# ============================================================
+
+def _parse_period_to_days(period: str) -> int:
+    """解析 period 字符串为天数"""
+    if period.endswith("d"):
+        return int(period[:-1])
+    elif period.endswith("m"):
+        return int(period[:-1]) * 30
+    elif period.endswith("y"):
+        return int(period[:-1]) * 365
+    else:
+        return 30  # 默认 30 天
+

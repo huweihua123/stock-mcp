@@ -56,6 +56,7 @@ class DataSource(str, Enum):
     TUSHARE = "tushare"
     BAOSTOCK = "baostock"
     CRYPTO = "crypto"
+    EDGAR = "edgar"
 
 
 @dataclass
