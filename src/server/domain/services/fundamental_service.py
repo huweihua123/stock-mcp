@@ -167,6 +167,44 @@ class FinancialRatios:
             logger.warning(f"Error calculating growth ratios: {e}")
         return ratios
 
+    @staticmethod
+    def calculate_dupont_analysis(data: Dict) -> Dict:
+        """Calculate Dupont Analysis components (ROE Breakdown)."""
+        analysis = {
+            "net_profit_margin": None,
+            "asset_turnover": None,
+            "equity_multiplier": None,
+            "roe": None
+        }
+        try:
+            revenue = data.get("revenue", 0)
+            net_profit = data.get("net_profit", 0)
+            total_assets = data.get("total_assets", 0)
+            net_assets = data.get("net_assets", 0)
+
+            if revenue > 0 and total_assets > 0 and net_assets > 0:
+                # 1. Net Profit Margin (Net Profit / Revenue)
+                net_profit_margin = net_profit / revenue
+                
+                # 2. Asset Turnover (Revenue / Total Assets)
+                asset_turnover = revenue / total_assets
+                
+                # 3. Equity Multiplier (Total Assets / Net Assets)
+                equity_multiplier = total_assets / net_assets
+                
+                # ROE (Check consistency)
+                roe = net_profit_margin * asset_turnover * equity_multiplier
+
+                analysis = {
+                    "net_profit_margin": round(net_profit_margin * 100, 2), # %
+                    "asset_turnover": round(asset_turnover, 4),             # times
+                    "equity_multiplier": round(equity_multiplier, 2),       # times
+                    "roe": round(roe * 100, 2)                              # %
+                }
+        except Exception as e:
+            logger.warning(f"Error calculating Dupont Analysis: {e}")
+        return analysis
+
 
 class FundamentalService:
     """Fundamental Analysis Service."""
@@ -184,7 +222,7 @@ class FundamentalService:
             raise
 
     def _extract_financial_data(
-        self, balance_df, income_df, cashflow_df, indicator_df, raw_info=None
+        self, balance_df, income_df, cashflow_df, indicator_df, raw_info=None, market_metrics=None
     ) -> Dict:
         """Extract key financial data from DataFrames or list of dicts."""
         data = {}
@@ -260,7 +298,32 @@ class FundamentalService:
                     data["asset_liability_ratio"] = parse(latest.get("debt_to_assets", 0)) * 100
                 if "current_ratio" in latest:
                     data["current_ratio"] = parse(latest.get("current_ratio", 0))
-                    
+            
+            # Market Metrics (from daily_basic)
+            if not is_empty(market_metrics):
+                latest = get_latest(market_metrics)
+                # Tushare returns total_mv in 10k CNY usually, but let's check. 
+                # Actually daily_basic total_mv is in 10k.
+                # But fundamental_service seems to expect raw numbers or handles units?
+                # The parse function removes "万".
+                # Let's assume standard units. Tushare daily_basic total_mv is in "ten thousands".
+                # So 10000 means 100 million.
+                # However, balance sheet items from Tushare are usually in raw currency (CNY).
+                # We need to be careful with units.
+                # Let's just pass raw for now and assume consistency or fix later if needed.
+                # Actually, let's convert total_mv to raw if we know it's 10k.
+                # Tushare docs: total_mv: 总市值 （万元）
+                
+                mv = parse(latest.get("total_mv", 0)) * 10000 
+                if mv > 0: data["market_cap"] = mv
+                
+                if "pe_ttm" in latest: data["pe_ratio"] = parse(latest.get("pe_ttm", 0))
+                elif "pe" in latest: data["pe_ratio"] = parse(latest.get("pe", 0))
+                
+                if "pb" in latest: data["pb_ratio"] = parse(latest.get("pb", 0))
+                if "ps_ttm" in latest: data["ps_ratio"] = parse(latest.get("ps_ttm", 0))
+                if "dv_ratio" in latest: data["dividend_yield"] = parse(latest.get("dv_ratio", 0))
+
             elif raw_info:
                 data["market_cap"] = parse(raw_info.get("marketCap", 0))
                 data["dividend"] = parse(raw_info.get("dividendRate", 0) or raw_info.get("dividendYield", 0))
@@ -369,23 +432,26 @@ class FundamentalService:
             income_df = financial_data_raw.get("income_statement")
             cashflow_df = financial_data_raw.get("cash_flow")
             indicator_df = financial_data_raw.get("financial_indicators")
+            market_metrics = financial_data_raw.get("market_metrics")
             company_info = financial_data_raw.get("company_info", {})
             raw_info = financial_data_raw.get("_raw_info")
 
             financial_data = self._extract_financial_data(
-                balance_df, income_df, cashflow_df, indicator_df, raw_info
+                balance_df, income_df, cashflow_df, indicator_df, raw_info, market_metrics
             )
 
             valuation = FinancialRatios.calculate_valuation_ratios(financial_data)
             profitability = FinancialRatios.calculate_profitability_ratios(financial_data)
             solvency = FinancialRatios.calculate_solvency_ratios(financial_data)
             growth = FinancialRatios.calculate_growth_ratios(financial_data)
+            dupont = FinancialRatios.calculate_dupont_analysis(financial_data)
 
             all_ratios = {
                 "valuation": valuation,
                 "profitability": profitability,
                 "solvency": solvency,
                 "growth": growth,
+                "dupont": dupont,
             }
 
             health_score = self._calculate_health_score(all_ratios)

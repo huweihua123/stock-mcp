@@ -353,7 +353,7 @@ class TushareAdapter(BaseDataAdapter):
         Returns:
             Dictionary containing financial data
         """
-        cache_key = f"tushare:financials:{ticker}"
+        cache_key = f"tushare:financials:{ticker}:v2"
         cached = await self.cache.get(cache_key)
         if cached:
             return cached
@@ -402,6 +402,15 @@ class TushareAdapter(BaseDataAdapter):
                 return_exceptions=True,
             )
 
+            # 每日指标 (Daily Basic - PE/PB/MarketCap)
+            # Fetch latest available
+            daily_basic_df = await self._run(
+                client.daily_basic,
+                ts_code=ts_code,
+                fields="ts_code,trade_date,pe,pe_ttm,pb,ps,ps_ttm,dv_ratio,total_mv,circ_mv",
+                limit=1
+            )
+
             # Helper function to convert DataFrame to serializable format
             def df_to_dict(df):
                 if isinstance(df, Exception):
@@ -418,6 +427,7 @@ class TushareAdapter(BaseDataAdapter):
                 "balance_sheet": df_to_dict(balance_df),
                 "cash_flow": df_to_dict(cashflow_df),
                 "financial_indicators": df_to_dict(indicator_df),
+                "market_metrics": df_to_dict(daily_basic_df),
                 "source": "tushare",
                 "ts_code": ts_code,
             }
