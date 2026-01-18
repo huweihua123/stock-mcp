@@ -828,7 +828,7 @@ class AdapterManager:
         raise ValueError(f"All adapters failed to fetch chip distribution for {ticker}")
 
     async def get_macro_data(self, indicators: List[str] = None) -> Dict[str, Any]:
-        """获取宏观经济数据
+        """获取宏观经济数据 (带自动降级)
 
         Args:
             indicators: 指标列表 ["CPI", "PPI", "M2", "GDP"]
@@ -836,7 +836,7 @@ class AdapterManager:
         Returns:
             包含宏观数据的字典
         """
-        # 宏观数据是全市场数据，优先使用 Tushare
+        # 宏观数据优先使用 Tushare
         from src.server.domain.types import DataSource
 
         if DataSource.TUSHARE in self.adapters:
@@ -853,12 +853,72 @@ class AdapterManager:
             except NotImplementedError:
                 continue
             except Exception as e:
-                logger.warning(
-                    f"Adapter {adapter.source.value} failed for macro data: {e}"
-                )
+                logger.warning(f"Adapter {adapter.source.value} failed for macro: {e}")
                 continue
 
         raise ValueError("No adapter supports macro economic data")
+
+    async def get_technical_indicators(
+        self,
+        ticker: str,
+        indicators: List[str],
+        period: str = "daily",
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        """获取技术指标数据 (带自动降级)
+
+        Args:
+            ticker: 股票代码
+            indicators: 指标列表
+            period: 周期
+            start_date: 开始日期
+            end_date: 结束日期
+
+        Returns:
+            技术指标数据
+        """
+        adapter = self.get_adapter_for_ticker(ticker)
+        if not adapter:
+            raise ValueError(f"No adapter found for ticker {ticker}")
+
+        try:
+            return await adapter.get_technical_indicators(
+                ticker, indicators, period, start_date, end_date
+            )
+        except NotImplementedError:
+            logger.warning(
+                f"Adapter {adapter.source.value} does not support technical indicators"
+            )
+        except Exception as e:
+            logger.warning(
+                f"Adapter {adapter.source.value} failed for technical indicators: {e}"
+            )
+
+        # Try failover
+        if ":" in ticker:
+            exchange, _ = ticker.split(":", 1)
+            adapters = self.get_adapters_for_exchange(exchange)
+
+            for alt in adapters:
+                if alt is adapter:
+                    continue
+                try:
+                    logger.info(
+                        f"Trying failover adapter {alt.source.value} "
+                        f"for technical indicators of {ticker}"
+                    )
+                    return await alt.get_technical_indicators(
+                        ticker, indicators, period, start_date, end_date
+                    )
+                except Exception as failover_error:
+                    logger.warning(
+                        f"Failover adapter {alt.source.value} "
+                        f"also failed: {failover_error}"
+                    )
+                    continue
+
+        raise ValueError(f"All adapters failed to fetch technical indicators for {ticker}")
 
 
 # Singleton instance

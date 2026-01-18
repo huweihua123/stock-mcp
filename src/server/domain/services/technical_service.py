@@ -145,79 +145,30 @@ class TechnicalService:
     async def calculate_indicators(
         self, symbol: str, period: str = "90d", interval: str = "1d"
     ) -> Dict[str, Any]:
-        """Calculate technical indicators and return structured data."""
+        """Calculate technical indicators and return structured data (Time Series)."""
         try:
-            # Force fetch enough data for SMA200 regardless of requested period
-            # Parse requested period to see if we need more
-            days_needed = 250  # Minimum for SMA200 + buffer
+            # Parse requested period to start/end dates
+            days = 90
+            if period.endswith("d"):
+                days = int(period[:-1])
+            elif period.endswith("m"):
+                days = int(period[:-1]) * 30
+            elif period.endswith("y"):
+                days = int(period[:-1]) * 365
             
-            # Use the longer of requested period or needed days
-            fetch_period = f"{days_needed}d"
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=days)
+
+            # Delegate to AdapterManager
+            # The adapter will handle data fetching and calculation (returning time series)
+            result = await self.adapter_manager.get_technical_indicators(
+                ticker=symbol,
+                indicators=["MA", "MACD", "KDJ", "RSI", "VOL"],
+                period="daily", # Adapter currently only supports daily logic effectively
+                start_date=start_date,
+                end_date=end_date
+            )
             
-            data = await self._get_price_data(symbol, fetch_period, interval)
-            if data is None or data.empty:
-                return {"error": f"No price data for {symbol}"}
-
-            # Calculate indicators
-            sma_20 = self._calculate_sma(data, 20)
-            sma_50 = self._calculate_sma(data, 50)
-            sma_200 = self._calculate_sma(data, 200)
-            ema_12 = self._calculate_ema(data, 12)
-            ema_26 = self._calculate_ema(data, 26)
-            rsi = self._calculate_rsi(data, 14)
-            macd_line, signal_line, histogram = self._calculate_macd(data)
-            bb_upper, bb_middle, bb_lower = self._calculate_bollinger_bands(data)
-            k_line, d_line = self._calculate_stochastic(data)
-            atr = self._calculate_atr(data)
-
-            # Get latest values
-            latest = data.iloc[-1]
-            current_price = float(latest["close"])
-            
-            def get_val(series):
-                return float(series.iloc[-1]) if not pd.isna(series.iloc[-1]) else None
-
-            result = {
-                "symbol": symbol,
-                "timestamp": datetime.now().isoformat(),
-                "price": {
-                    "current": current_price,
-                    "open": float(latest["open"]),
-                    "high": float(latest["high"]),
-                    "low": float(latest["low"]),
-                    "volume": float(latest["volume"]),
-                },
-                "indicators": {
-                    "sma": {
-                        "sma_20": get_val(sma_20),
-                        "sma_50": get_val(sma_50),
-                        "sma_200": get_val(sma_200),
-                    },
-                    "ema": {
-                        "ema_12": get_val(ema_12),
-                        "ema_26": get_val(ema_26),
-                    },
-                    "rsi": {
-                        "value": get_val(rsi),
-                        "signal": "overbought" if get_val(rsi) > 70 else "oversold" if get_val(rsi) < 30 else "neutral"
-                    },
-                    "macd": {
-                        "macd": get_val(macd_line),
-                        "signal": get_val(signal_line),
-                        "histogram": get_val(histogram),
-                    },
-                    "bollinger_bands": {
-                        "upper": get_val(bb_upper),
-                        "middle": get_val(bb_middle),
-                        "lower": get_val(bb_lower),
-                    },
-                    "kdj": {
-                        "k": get_val(k_line),
-                        "d": get_val(d_line),
-                    },
-                    "atr": get_val(atr),
-                }
-            }
             return result
 
         except Exception as e:

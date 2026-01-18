@@ -209,6 +209,30 @@ class BaseDataAdapter(abc.ABC):
             f"{self.source.value} does not support get_macro_data"
         )
 
+    async def get_technical_indicators(
+        self,
+        ticker: str,
+        indicators: List[str],
+        period: str = "daily",
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        """Calculate technical indicators.
+
+        Args:
+            ticker: Asset ticker
+            indicators: List of indicators to calculate (e.g., ["MA", "MACD"])
+            period: Data period ("daily", "weekly", "monthly")
+            start_date: Start date
+            end_date: End date
+
+        Returns:
+            Dictionary containing calculated indicators
+        """
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_technical_indicators"
+        )
+
     @abc.abstractmethod
     def get_capabilities(self) -> List[AdapterCapability]:
         """Get capabilities describing supported types and exchanges.

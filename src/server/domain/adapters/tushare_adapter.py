@@ -173,8 +173,8 @@ class TushareAdapter(BaseDataAdapter):
                 high_price=Decimal(str(row["high"])),
                 low_price=Decimal(str(row["low"])),
                 close_price=Decimal(str(row["close"])),
-                change_amount=Decimal(str(row["change"])) if "change" in row else None,
-                change_percentage=(
+                change=Decimal(str(row["change"])) if "change" in row else None,
+                change_percent=(
                     Decimal(str(row["pct_chg"])) if "pct_chg" in row else None
                 ),
                 source=self.source,
@@ -258,10 +258,10 @@ class TushareAdapter(BaseDataAdapter):
                         high_price=Decimal(str(row["high"])),
                         low_price=Decimal(str(row["low"])),
                         close_price=Decimal(str(row["close"])),
-                        change_amount=(
+                        change=(
                             Decimal(str(row["change"])) if "change" in row else None
                         ),
-                        change_percentage=(
+                        change_percent=(
                             Decimal(str(row["pct_chg"])) if "pct_chg" in row else None
                         ),
                         source=self.source,
@@ -788,3 +788,145 @@ class TushareAdapter(BaseDataAdapter):
         except Exception as e:
             self.logger.error(f"Failed to get macro data: {e}")
             raise ValueError(f"Failed to get macro data: {e}")
+
+    async def get_technical_indicators(
+        self,
+        ticker: str,
+        indicators: List[str],
+        period: str = "daily",
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        """Calculate technical indicators.
+
+        Args:
+            ticker: Asset ticker
+            indicators: List of indicators ["MA", "MACD", "KDJ", "RSI", "VOL"]
+            period: Data period (currently only supports "daily")
+            start_date: Start date
+            end_date: End date
+
+        Returns:
+            Dictionary containing calculated indicators
+        """
+        if not indicators:
+            indicators = ["MA", "MACD", "KDJ", "RSI", "VOL"]
+
+        # Default to 1 year of data if not specified, to ensure enough data for indicators
+        if not end_date:
+            end_date = datetime.now()
+        if not start_date:
+            start_date = end_date - timedelta(days=365)
+
+        # Fetch historical prices
+        prices = await self.get_historical_prices(
+            ticker, start_date, end_date, interval="1d"
+        )
+
+        if not prices:
+            return {"error": f"No historical data for {ticker}", "source": "tushare"}
+
+        # Convert to DataFrame
+        data = [p.to_dict() for p in prices]
+        df = pd.DataFrame(data)
+        
+        # Rename columns to match technical analysis expectations
+        df = df.rename(columns={
+            "close_price": "close",
+            "open_price": "open",
+            "high_price": "high",
+            "low_price": "low"
+        })
+        
+        # Ensure numeric types
+        for col in ["close", "high", "low", "open", "volume"]:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+            
+        df = df.sort_values("timestamp")
+
+        # Ensure timestamp is datetime
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        
+        result = {
+            "dates": df["timestamp"].apply(lambda x: x.strftime("%Y-%m-%d")).tolist(),
+            "close": df["close"].tolist(),
+            "indicators": {},
+            "source": "tushare",
+            "ticker": ticker
+        }
+
+        try:
+            # MA (Moving Average)
+            if "MA" in indicators:
+                ma_data = {}
+                for window in [5, 10, 20, 30, 60]:
+                    ma_data[f"ma{window}"] = df["close"].rolling(window=window).mean().fillna(0).tolist()
+                result["indicators"]["ma"] = ma_data
+
+            # MACD
+            if "MACD" in indicators:
+                exp12 = df["close"].ewm(span=12, adjust=False).mean()
+                exp26 = df["close"].ewm(span=26, adjust=False).mean()
+                macd = exp12 - exp26
+                signal = macd.ewm(span=9, adjust=False).mean()
+                hist = (macd - signal) * 2
+                
+                result["indicators"]["macd"] = {
+                    "diff": macd.fillna(0).tolist(),
+                    "dea": signal.fillna(0).tolist(),
+                    "hist": hist.fillna(0).tolist()
+                }
+
+            # KDJ
+            if "KDJ" in indicators:
+                low_min = df["low"].rolling(window=9).min()
+                high_max = df["high"].rolling(window=9).max()
+                rsv = (df["close"] - low_min) / (high_max - low_min) * 100
+                
+                # Use simple moving average for K and D as per common Chinese stock software
+                # K = 2/3 * PrevK + 1/3 * RSV
+                # D = 2/3 * PrevD + 1/3 * K
+                # J = 3 * K - 2 * D
+                
+                k_list = []
+                d_list = []
+                j_list = []
+                
+                k = 50
+                d = 50
+                
+                for r in rsv.fillna(50):
+                    k = (2/3) * k + (1/3) * r
+                    d = (2/3) * d + (1/3) * k
+                    j = 3 * k - 2 * d
+                    k_list.append(k)
+                    d_list.append(d)
+                    j_list.append(j)
+                    
+                result["indicators"]["kdj"] = {
+                    "k": k_list,
+                    "d": d_list,
+                    "j": j_list
+                }
+
+            # RSI
+            if "RSI" in indicators:
+                delta = df["close"].diff()
+                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                rs = gain / loss
+                rsi = 100 - (100 / (1 + rs))
+                result["indicators"]["rsi"] = rsi.fillna(0).tolist()
+
+            # VOL (Volume MA)
+            if "VOL" in indicators:
+                vol_data = {"volume": df["volume"].tolist()}
+                for window in [5, 10, 20]:
+                    vol_data[f"ma{window}"] = df["volume"].rolling(window=window).mean().fillna(0).tolist()
+                result["indicators"]["vol"] = vol_data
+
+            return result
+
+        except Exception as e:
+            self.logger.error(f"Failed to calculate indicators for {ticker}: {e}")
+            raise ValueError(f"Failed to calculate indicators: {e}")
