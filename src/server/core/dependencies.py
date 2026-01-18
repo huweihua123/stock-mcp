@@ -25,6 +25,7 @@ from src.server.domain.services.fundamental_service import FundamentalService
 from src.server.domain.services.news_service import NewsService
 from src.server.domain.services.technical_service import TechnicalService
 from src.server.domain.services.filings_service import FilingsService
+from src.server.domain.services.money_flow_service import MoneyFlowService
 
 # Cache wrapper (aiocache)
 from src.server.infrastructure.cache.redis_cache import AsyncRedisCache
@@ -61,9 +62,13 @@ class Container(containers.DeclarativeContainer):
         YahooAdapter,
         cache=cache,
         proxy_url=providers.Callable(
-            lambda cfg: f"http://{cfg.proxy.host}:{cfg.proxy.port}" if cfg.proxy.enabled else None,
-            config
-        )
+            lambda cfg: (
+                f"http://{cfg.proxy.host}:{cfg.proxy.port}"
+                if cfg.proxy.enabled
+                else None
+            ),
+            config,
+        ),
     )
     akshare_adapter = providers.Singleton(AkshareAdapter, cache=cache)
     crypto_adapter = providers.Singleton(CryptoAdapter, cache=cache)
@@ -74,24 +79,20 @@ class Container(containers.DeclarativeContainer):
     finnhub_adapter = providers.Singleton(
         FinnhubAdapter, finnhub_conn=finnhub, cache=cache
     )
-    baostock_adapter = providers.Singleton(
-        BaostockAdapter, cache=cache
-    )
-    
+    baostock_adapter = providers.Singleton(BaostockAdapter, cache=cache)
+
     from src.server.domain.adapters.edgar_adapter import EdgarAdapter
-    edgar_adapter = providers.Singleton(
-        EdgarAdapter, cache=cache
-    )
+
+    edgar_adapter = providers.Singleton(EdgarAdapter, cache=cache)
 
     # Adapter manager
     from src.server.domain.adapter_manager import AdapterManager
 
-    adapter_manager = providers.Singleton(
-        AdapterManager
-    )
+    adapter_manager = providers.Singleton(AdapterManager)
 
     # MinIO Client
     from src.server.infrastructure.minio_client import MinioClient
+
     minio_client = providers.Singleton(MinioClient)
 
     # Services (receive adapter manager and cache)
@@ -114,4 +115,10 @@ class Container(containers.DeclarativeContainer):
         FilingsService,
         adapter_manager=adapter_manager,
         minio_client=minio_client,
+    )
+
+    # 资金流向服务
+    money_flow_service = providers.Factory(
+        MoneyFlowService,
+        adapter_manager=adapter_manager,
     )

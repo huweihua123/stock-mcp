@@ -153,6 +153,62 @@ class BaseDataAdapter(abc.ABC):
             f"{self.source.value} does not support get_financials"
         )
 
+    async def get_money_flow(self, ticker: str, days: int = 20) -> Dict[str, Any]:
+        """获取个股资金流向数据 (Optional)
+
+        Args:
+            ticker: 股票代码 (内部格式 SSE:600519)
+            days: 获取最近 N 天数据
+
+        Returns:
+            包含资金流向数据的字典
+        """
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_money_flow"
+        )
+
+    async def get_north_bound_flow(self, days: int = 30) -> Dict[str, Any]:
+        """获取北向资金流向数据 (Optional)
+
+        Args:
+            days: 获取最近 N 天数据
+
+        Returns:
+            包含北向资金数据的字典
+        """
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_north_bound_flow"
+        )
+
+    async def get_chip_distribution(
+        self, ticker: str, days: int = 30
+    ) -> Dict[str, Any]:
+        """获取筹码分布数据 (Optional)
+
+        Args:
+            ticker: 股票代码 (内部格式)
+            days: 获取最近 N 天数据
+
+        Returns:
+            包含筹码分布数据的字典
+        """
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_chip_distribution"
+        )
+
+    async def get_macro_data(self, indicators: List[str] = None) -> Dict[str, Any]:
+        """获取宏观经济数据 (Optional)
+
+        Args:
+            indicators: 指标列表 ["CPI", "PPI", "M2", "GDP"]
+
+        Returns:
+            包含宏观数据的字典
+        """
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_macro_data"
+        )
+
     @abc.abstractmethod
     def get_capabilities(self) -> List[AdapterCapability]:
         """Get capabilities describing supported types and exchanges.

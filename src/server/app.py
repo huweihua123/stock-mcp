@@ -19,7 +19,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.server.mcp.server import create_mcp_server
 from src.server.core.health import router as health_router
-from src.server.api.routes import market_data_router, filings_router, news_router, fundamental_router
+from src.server.api.routes import (
+    market_data_router,
+    filings_router,
+    news_router,
+    fundamental_router,
+    money_flow_router,
+)
 from src.server.core.dependencies import Container
 from src.server.utils.logger import logger
 
@@ -55,7 +61,7 @@ def create_app():
 
         # Get config
         config = Container.config()
-        
+
         # Initialize Tushare connection (only if enabled)
         tushare_available = False
         if config.tushare.is_available:
@@ -64,9 +70,13 @@ def create_app():
             if tushare_available:
                 logger.info("✅ Tushare connection established")
             else:
-                logger.warning("⚠️ Tushare connection failed - will use fallback adapters")
+                logger.warning(
+                    "⚠️ Tushare connection failed - will use fallback adapters"
+                )
         else:
-            logger.info("ℹ️  Tushare disabled (set TUSHARE_ENABLED=True and provide token to enable)")
+            logger.info(
+                "ℹ️  Tushare disabled (set TUSHARE_ENABLED=True and provide token to enable)"
+            )
 
         # Initialize FinnHub connection (only if enabled)
         finnhub_available = False
@@ -76,7 +86,9 @@ def create_app():
             finnhub_available = True
             logger.info("✅ FinnHub connection established")
         else:
-            logger.info("ℹ️  FinnHub disabled (set FINNHUB_ENABLED=True and provide API key to enable)")
+            logger.info(
+                "ℹ️  FinnHub disabled (set FINNHUB_ENABLED=True and provide API key to enable)"
+            )
 
         # Initialize Baostock connection
         baostock = Container.baostock()
@@ -211,6 +223,7 @@ def create_app():
     app.include_router(filings_router, prefix="/api/v1", tags=["Filings"])
     app.include_router(news_router, tags=["News"])
     app.include_router(fundamental_router, tags=["Fundamental"])
+    app.include_router(money_flow_router, tags=["Money Flow"])
 
     logger.info("✅ RESTful API routes registered")
     logger.info("   - Health check: /health")
@@ -218,6 +231,7 @@ def create_app():
     logger.info("   - Filings: /api/v1/filings/*")
     logger.info("   - News: /api/v1/news/*")
     logger.info("   - Fundamental: /api/v1/fundamental/*")
+    logger.info("   - Money Flow: /api/v1/money-flow/*")
 
     # 6. Mount MCP protocol endpoint
     if mcp_app:

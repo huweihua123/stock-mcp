@@ -39,7 +39,7 @@ async def mcp_lifespan(mcp: FastMCP):
 
     # Get config
     config = Container.config()
-    
+
     # Initialize Tushare connection (only if enabled)
     tushare_available = False
     if config.tushare.is_available:
@@ -50,7 +50,9 @@ async def mcp_lifespan(mcp: FastMCP):
         else:
             logger.warning("⚠️ Tushare connection failed - will use fallback adapters")
     else:
-        logger.info("ℹ️  Tushare disabled (set TUSHARE_ENABLED=True and provide token to enable)")
+        logger.info(
+            "ℹ️  Tushare disabled (set TUSHARE_ENABLED=True and provide token to enable)"
+        )
 
     # Initialize FinnHub connection (only if enabled)
     finnhub_available = False
@@ -60,7 +62,9 @@ async def mcp_lifespan(mcp: FastMCP):
         finnhub_available = True
         logger.info("✅ FinnHub connection established")
     else:
-        logger.info("ℹ️  FinnHub disabled (set FINNHUB_ENABLED=True and provide API key to enable)")
+        logger.info(
+            "ℹ️  FinnHub disabled (set FINNHUB_ENABLED=True and provide API key to enable)"
+        )
 
     # Initialize Baostock connection
     baostock = Container.baostock()
@@ -126,6 +130,7 @@ def create_mcp_server() -> FastMCP:
     from src.server.mcp.tools.filings_tools import register_filings_tools
     from src.server.mcp.tools.trade_tools import register_trade_tools
     from src.server.mcp.tools.chunking_tools import register_chunking_tools
+    from src.server.mcp.tools.money_flow_tools import register_money_flow_tools
 
     # Register core tools
     register_fundamental_tools(mcp)
@@ -149,6 +154,9 @@ def create_mcp_server() -> FastMCP:
 
     register_trade_tools(mcp)
     logger.info("  ✓ Trade tools registered (2 tools)")
+
+    register_money_flow_tools(mcp)
+    logger.info("  ✓ Money flow tools registered (2 tools)")
 
     register_chunking_tools(mcp)
     logger.info("  ✓ Chunking tools registered (1 tool)")

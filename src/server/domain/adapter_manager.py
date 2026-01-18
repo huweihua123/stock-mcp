@@ -13,7 +13,7 @@ import threading
 import asyncio
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from src.server.domain.adapters.base import BaseDataAdapter
 from src.server.domain.types import (
@@ -697,6 +697,168 @@ class AdapterManager:
                         continue
 
             raise ValueError(f"All adapters failed to fetch filings for {ticker}: {e}")
+
+    async def get_money_flow(self, ticker: str, days: int = 20) -> Dict[str, Any]:
+        """获取个股资金流向数据 (带自动降级)
+
+        Args:
+            ticker: 股票代码 (内部格式 SSE:600519)
+            days: 获取最近 N 天数据
+
+        Returns:
+            包含资金流向的结构化数据
+        """
+        adapter = self.get_adapter_for_ticker(ticker)
+        if not adapter:
+            raise ValueError(f"No adapter found for ticker {ticker}")
+
+        try:
+            return await adapter.get_money_flow(ticker, days)
+        except NotImplementedError:
+            logger.warning(
+                f"Adapter {adapter.source.value} does not support money flow"
+            )
+        except Exception as e:
+            logger.warning(f"Adapter {adapter.source.value} failed for money flow: {e}")
+
+        # Try failover
+        if ":" in ticker:
+            exchange, _ = ticker.split(":", 1)
+            adapters = self.get_adapters_for_exchange(exchange)
+
+            for alt in adapters:
+                if alt is adapter:
+                    continue
+                try:
+                    logger.info(
+                        f"Trying failover adapter {alt.source.value} "
+                        f"for money flow of {ticker}"
+                    )
+                    return await alt.get_money_flow(ticker, days)
+                except Exception as failover_error:
+                    logger.warning(
+                        f"Failover adapter {alt.source.value} "
+                        f"also failed: {failover_error}"
+                    )
+                    continue
+
+        raise ValueError(f"All adapters failed to fetch money flow for {ticker}")
+
+    async def get_north_bound_flow(self, days: int = 30) -> Dict[str, Any]:
+        """获取北向资金流向数据 (沪深港通)
+
+        Args:
+            days: 获取最近 N 天数据
+
+        Returns:
+            包含北向资金数据的结构化数据
+        """
+        # 北向资金是全市场数据，优先使用 Tushare
+        from src.server.domain.types import DataSource
+
+        if DataSource.TUSHARE in self.adapters:
+            adapter = self.adapters[DataSource.TUSHARE]
+            try:
+                return await adapter.get_north_bound_flow(days)
+            except Exception as e:
+                logger.warning(f"Tushare failed for north bound flow: {e}")
+
+        # Try other adapters
+        for adapter in self._adapter_order:
+            try:
+                return await adapter.get_north_bound_flow(days)
+            except NotImplementedError:
+                continue
+            except Exception as e:
+                logger.warning(
+                    f"Adapter {adapter.source.value} failed for north bound: {e}"
+                )
+                continue
+
+        raise ValueError("No adapter supports north bound flow data")
+
+    async def get_chip_distribution(
+        self, ticker: str, days: int = 30
+    ) -> Dict[str, Any]:
+        """获取筹码分布数据 (带自动降级)
+
+        Args:
+            ticker: 股票代码 (内部格式)
+            days: 获取最近 N 天数据
+
+        Returns:
+            包含筹码分布数据的字典
+        """
+        adapter = self.get_adapter_for_ticker(ticker)
+        if not adapter:
+            raise ValueError(f"No adapter found for ticker {ticker}")
+
+        try:
+            return await adapter.get_chip_distribution(ticker, days)
+        except NotImplementedError:
+            logger.warning(
+                f"Adapter {adapter.source.value} does not support chip distribution"
+            )
+        except Exception as e:
+            logger.warning(
+                f"Adapter {adapter.source.value} failed for chip distribution: {e}"
+            )
+
+        # Try failover
+        if ":" in ticker:
+            exchange, _ = ticker.split(":", 1)
+            adapters = self.get_adapters_for_exchange(exchange)
+
+            for alt in adapters:
+                if alt is adapter:
+                    continue
+                try:
+                    logger.info(
+                        f"Trying failover adapter {alt.source.value} "
+                        f"for chip distribution of {ticker}"
+                    )
+                    return await alt.get_chip_distribution(ticker, days)
+                except Exception as failover_error:
+                    logger.warning(
+                        f"Failover adapter {alt.source.value} "
+                        f"also failed: {failover_error}"
+                    )
+                    continue
+
+        raise ValueError(f"All adapters failed to fetch chip distribution for {ticker}")
+
+    async def get_macro_data(self, indicators: List[str] = None) -> Dict[str, Any]:
+        """获取宏观经济数据
+
+        Args:
+            indicators: 指标列表 ["CPI", "PPI", "M2", "GDP"]
+
+        Returns:
+            包含宏观数据的字典
+        """
+        # 宏观数据是全市场数据，优先使用 Tushare
+        from src.server.domain.types import DataSource
+
+        if DataSource.TUSHARE in self.adapters:
+            adapter = self.adapters[DataSource.TUSHARE]
+            try:
+                return await adapter.get_macro_data(indicators)
+            except Exception as e:
+                logger.warning(f"Tushare failed for macro data: {e}")
+
+        # Try other adapters
+        for adapter in self._adapter_order:
+            try:
+                return await adapter.get_macro_data(indicators)
+            except NotImplementedError:
+                continue
+            except Exception as e:
+                logger.warning(
+                    f"Adapter {adapter.source.value} failed for macro data: {e}"
+                )
+                continue
+
+        raise ValueError("No adapter supports macro economic data")
 
 
 # Singleton instance
