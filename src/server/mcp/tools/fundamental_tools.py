@@ -18,7 +18,9 @@ def register_fundamental_tools(mcp: FastMCP):
         """Get financial report for the given ticker.
 
         Args:
-            symbol: Stock ticker symbol
+            symbol: Asset ticker. Format: EXCHANGE:SYMBOL
+                - A股: SSE:600519 (上交所), SZSE:000001 (深交所)
+                - 美股: NASDAQ:AAPL, NYSE:TSLA
 
         Returns:
             Dictionary containing financial analysis

@@ -18,11 +18,10 @@ def register_news_tools(mcp: FastMCP):
         """Get professional stock news.
 
         Args:
-            symbol: 股票代码。
-                > **💡 重要提示**: 
-                > - A股股票代码格式：`SSE:600519`（上交所）、`SZSE:000001`（深交所）
-                > - 美股股票代码格式：`NASDAQ:AAPL`、`NYSE:TSLA`
-                > - 加密货币格式：`CRYPTO:BTC`、`CRYPTO:ETH`
+            symbol: Asset ticker. Format: EXCHANGE:SYMBOL
+                - A股: SSE:600519 (上交所), SZSE:000001 (深交所)
+                - 美股: NASDAQ:AAPL, NYSE:TSLA
+                - 加密货币: CRYPTO:BTC, CRYPTO:ETH
             days_back: Days to look back (default 7)
 
         Returns:

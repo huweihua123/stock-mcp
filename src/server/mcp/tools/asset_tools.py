@@ -97,7 +97,10 @@ def register_asset_tools(mcp: FastMCP):
         """Get detailed asset information.
 
         Args:
-            ticker: Asset ticker (EXCHANGE:SYMBOL)
+            ticker: Asset ticker. Format: EXCHANGE:SYMBOL
+                - A股: SSE:600519 (上交所), SZSE:000001 (深交所)
+                - 美股: NASDAQ:AAPL, NYSE:TSLA
+                - 加密货币: CRYPTO:BTC, CRYPTO:ETH
 
         Returns:
             Asset details
@@ -120,7 +123,10 @@ def register_asset_tools(mcp: FastMCP):
         """Get real-time price for an asset.
 
         Args:
-            ticker: Asset ticker (EXCHANGE:SYMBOL)
+            ticker: Asset ticker. Format: EXCHANGE:SYMBOL
+                - A股: SSE:600519 (上交所), SZSE:000001 (深交所)
+                - 美股: NASDAQ:AAPL, NYSE:TSLA
+                - 加密货币: CRYPTO:BTC, CRYPTO:ETH
 
         Returns:
             Real-time price data
@@ -143,7 +149,10 @@ def register_asset_tools(mcp: FastMCP):
         """Get real-time prices for multiple assets.
 
         Args:
-            tickers: List of asset tickers
+            tickers: List of asset tickers. Format: EXCHANGE:SYMBOL
+                - A股: SSE:600519 (上交所), SZSE:000001 (深交所)
+                - 美股: NASDAQ:AAPL, NYSE:TSLA
+                - 加密货币: CRYPTO:BTC, CRYPTO:ETH
 
         Returns:
             Dictionary mapping tickers to price data
@@ -161,7 +170,10 @@ def register_asset_tools(mcp: FastMCP):
         """Get historical price data.
 
         Args:
-            ticker: Asset ticker
+            ticker: Asset ticker. Format: EXCHANGE:SYMBOL
+                - A股: SSE:600519 (上交所), SZSE:000001 (深交所)
+                - 美股: NASDAQ:AAPL, NYSE:TSLA
+                - 加密货币: CRYPTO:BTC, CRYPTO:ETH
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD)
             interval: Data interval (1d, 1wk, 1mo)
@@ -199,7 +211,10 @@ def register_asset_tools(mcp: FastMCP):
         Includes current price and asset info.
 
         Args:
-            symbol: Ticker symbol
+            symbol: Asset ticker. Format: EXCHANGE:SYMBOL
+                - A股: SSE:600519 (上交所), SZSE:000001 (深交所)
+                - 美股: NASDAQ:AAPL, NYSE:TSLA
+                - 加密货币: CRYPTO:BTC, CRYPTO:ETH
 
         Returns:
             Dictionary with asset info and current price

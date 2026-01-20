@@ -74,7 +74,10 @@ def register_technical_tools(mcp: FastMCP):
         - ATR
 
         Args:
-            symbol: Stock symbol (e.g., AAPL, 600519)
+            symbol: Asset ticker. Format: EXCHANGE:SYMBOL
+                - A股: SSE:600519 (上交所), SZSE:000001 (深交所)
+                - 美股: NASDAQ:AAPL, NYSE:TSLA
+                - 加密货币: CRYPTO:BTC, CRYPTO:ETH
             period: Data period (30d, 90d, 1y)
             interval: Data interval (1d)
 
@@ -94,9 +97,12 @@ def register_technical_tools(mcp: FastMCP):
         """Generate trading signals based on technical indicators.
 
         Args:
-            symbol: Stock symbol
-            period: Analysis period
-            interval: Data interval
+            symbol: Asset ticker. Format: EXCHANGE:SYMBOL
+                - A股: SSE:600519 (上交所), SZSE:000001 (深交所)
+                - 美股: NASDAQ:AAPL, NYSE:TSLA
+                - 加密货币: CRYPTO:BTC, CRYPTO:ETH
+            period: Analysis period (30d, 90d, 1y)
+            interval: Data interval (1d)
 
         Returns:
             Dictionary containing trading signals
@@ -122,8 +128,11 @@ def register_technical_tools(mcp: FastMCP):
         """Analyze price patterns.
 
         Args:
-            symbol: Stock symbol
-            period: Analysis period
+            symbol: Asset ticker. Format: EXCHANGE:SYMBOL
+                - A股: SSE:600519 (上交所), SZSE:000001 (深交所)
+                - 美股: NASDAQ:AAPL, NYSE:TSLA
+                - 加密货币: CRYPTO:BTC, CRYPTO:ETH
+            period: Analysis period (30d, 90d, 1y)
 
         Returns:
             Dictionary containing pattern analysis
@@ -147,8 +156,11 @@ def register_technical_tools(mcp: FastMCP):
         """Calculate support and resistance levels.
 
         Args:
-            symbol: Stock symbol
-            period: Analysis period
+            symbol: Asset ticker. Format: EXCHANGE:SYMBOL
+                - A股: SSE:600519 (上交所), SZSE:000001 (深交所)
+                - 美股: NASDAQ:AAPL, NYSE:TSLA
+                - 加密货币: CRYPTO:BTC, CRYPTO:ETH
+            period: Analysis period (30d, 90d, 1y)
 
         Returns:
             Dictionary containing support/resistance levels
@@ -176,8 +188,11 @@ def register_technical_tools(mcp: FastMCP):
         """Analyze volume profile.
 
         Args:
-            symbol: Stock symbol
-            period: Analysis period
+            symbol: Asset ticker. Format: EXCHANGE:SYMBOL
+                - A股: SSE:600519 (上交所), SZSE:000001 (深交所)
+                - 美股: NASDAQ:AAPL, NYSE:TSLA
+                - 加密货币: CRYPTO:BTC, CRYPTO:ETH
+            period: Analysis period (30d, 90d, 1y)
 
         Returns:
             Dictionary containing volume analysis

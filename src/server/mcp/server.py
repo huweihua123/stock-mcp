@@ -156,7 +156,7 @@ def create_mcp_server() -> FastMCP:
     logger.info("  ✓ Trade tools registered (2 tools)")
 
     register_money_flow_tools(mcp)
-    logger.info("  ✓ Money flow tools registered (2 tools)")
+    logger.info("  ✓ Money flow tools registered (4 tools)")  # Updated count
 
     register_chunking_tools(mcp)
     logger.info("  ✓ Chunking tools registered (1 tool)")

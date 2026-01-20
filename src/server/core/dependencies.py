@@ -26,6 +26,7 @@ from src.server.domain.services.news_service import NewsService
 from src.server.domain.services.technical_service import TechnicalService
 from src.server.domain.services.filings_service import FilingsService
 from src.server.domain.services.money_flow_service import MoneyFlowService
+from src.server.domain.services.chip_service import ChipService
 
 # Cache wrapper (aiocache)
 from src.server.infrastructure.cache.redis_cache import AsyncRedisCache
@@ -121,4 +122,11 @@ class Container(containers.DeclarativeContainer):
     money_flow_service = providers.Factory(
         MoneyFlowService,
         adapter_manager=adapter_manager,
+    )
+
+    # 筹码分布服务
+    chip_service = providers.Factory(
+        ChipService,
+        adapter_manager=adapter_manager,
+        cache=cache,
     )

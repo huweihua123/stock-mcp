@@ -58,20 +58,20 @@ class TechnicalService:
             # Convert to DataFrame
             data = [p.to_dict() for p in prices]
             df = pd.DataFrame(data)
-            
+
             # Rename columns to match technical analysis expectations if needed
             # AssetPrice dict keys: ticker, price, currency, timestamp, volume, open_price, high_price, low_price, close_price, ...
             # We need: open, high, low, close, volume, date (index)
-            
+
             rename_map = {
                 "open_price": "open",
                 "high_price": "high",
                 "low_price": "low",
                 "close_price": "close",
-                "timestamp": "date"
+                "timestamp": "date",
             }
             df = df.rename(columns=rename_map)
-            
+
             # Ensure numeric types
             for col in ["open", "high", "low", "close", "volume"]:
                 if col in df.columns:
@@ -155,7 +155,7 @@ class TechnicalService:
                 days = int(period[:-1]) * 30
             elif period.endswith("y"):
                 days = int(period[:-1]) * 365
-            
+
             end_date = datetime.now()
             start_date = end_date - timedelta(days=days)
 
@@ -164,11 +164,17 @@ class TechnicalService:
             result = await self.adapter_manager.get_technical_indicators(
                 ticker=symbol,
                 indicators=["MA", "MACD", "KDJ", "RSI", "VOL"],
-                period="daily", # Adapter currently only supports daily logic effectively
+                period="daily",  # Adapter currently only supports daily logic effectively
                 start_date=start_date,
-                end_date=end_date
+                end_date=end_date,
             )
-            
+
+            # ⭐ 添加 component_type 以支持前端自动识别为可视化 Artifact
+            if "error" not in result:
+                result["component_type"] = "technical_indicators"
+                result["symbol"] = symbol
+                result["title"] = f"技术指标分析: {symbol}"
+
             return result
 
         except Exception as e:
@@ -179,26 +185,26 @@ class TechnicalService:
         self, symbol: str, period: str = "90d", interval: str = "1d"
     ) -> Dict[str, Any]:
         """Generate trading signals based on technical indicators.
-        
+
         Strategy: Moving Average Crossover (Golden Cross / Death Cross)
         """
         try:
             # 1. Fetch sufficient data (at least 60 days for SMA50 calculation)
-            fetch_period = "100d" # Ensure enough data for SMA50
-            
+            fetch_period = "100d"  # Ensure enough data for SMA50
+
             data = await self._get_price_data(symbol, fetch_period, interval)
             if data is None or data.empty or len(data) < 50:
                 return {
                     "symbol": symbol,
                     "signal": "neutral",
-                    "reason": "Insufficient data for analysis (need > 50 days)"
+                    "reason": "Insufficient data for analysis (need > 50 days)",
                 }
 
             # 2. Calculate Indicators
             sma_20 = self._calculate_sma(data, 20)
             sma_50 = self._calculate_sma(data, 50)
             rsi = self._calculate_rsi(data, 14)
-            
+
             # Get latest and previous values
             current_sma20 = sma_20.iloc[-1]
             current_sma50 = sma_50.iloc[-1]
@@ -217,7 +223,7 @@ class TechnicalService:
                 signal = "buy"
                 reason.append("Golden Cross: SMA20 crossed above SMA50")
                 confidence += 0.6
-            
+
             # Death Cross: SMA20 crosses below SMA50
             elif prev_sma20 >= prev_sma50 and current_sma20 < current_sma50:
                 signal = "sell"
@@ -237,10 +243,12 @@ class TechnicalService:
             # RSI Filter
             if current_rsi < 30:
                 reason.append(f"RSI Oversold ({current_rsi:.1f})")
-                if signal == "buy": confidence += 0.2
+                if signal == "buy":
+                    confidence += 0.2
             elif current_rsi > 70:
                 reason.append(f"RSI Overbought ({current_rsi:.1f})")
-                if signal == "sell": confidence += 0.2
+                if signal == "sell":
+                    confidence += 0.2
 
             return {
                 "symbol": symbol,
@@ -251,9 +259,9 @@ class TechnicalService:
                 "indicators": {
                     "sma_20": float(current_sma20),
                     "sma_50": float(current_sma50),
-                    "rsi": float(current_rsi)
+                    "rsi": float(current_rsi),
                 },
-                "reasons": reason
+                "reasons": reason,
             }
 
         except Exception as e:
@@ -268,53 +276,84 @@ class TechnicalService:
             data = await self._get_price_data(symbol, period)
             if data is None or data.empty:
                 return {"error": "No data"}
-                
+
             # Simple pivot point calculation based on recent highs/lows
             recent_high = data["high"].max()
             recent_low = data["low"].min()
             current = data["close"].iloc[-1]
-            
+
             levels = []
             # Add recent high/low as levels
-            levels.append({"price": float(recent_high), "type": "resistance", "strength": "strong"})
-            levels.append({"price": float(recent_low), "type": "support", "strength": "strong"})
-            
-            return {
-                "symbol": symbol,
-                "current_price": float(current),
-                "levels": levels
-            }
+            levels.append(
+                {
+                    "price": float(recent_high),
+                    "type": "resistance",
+                    "strength": "strong",
+                }
+            )
+            levels.append(
+                {"price": float(recent_low), "type": "support", "strength": "strong"}
+            )
+
+            return {"symbol": symbol, "current_price": float(current), "levels": levels}
         except Exception as e:
             return {"error": str(e)}
 
-    async def analyze_price_patterns(self, symbol: str, period: str = "90d") -> Dict[str, Any]:
+    async def analyze_price_patterns(
+        self, symbol: str, period: str = "90d"
+    ) -> Dict[str, Any]:
         """Analyze price patterns (Candlestick patterns)."""
         try:
             data = await self._get_price_data(symbol, period)
             if data is None or data.empty:
                 return {"error": "No data"}
-            
+
             patterns = []
             latest = data.iloc[-1]
             prev = data.iloc[-2]
-            
+
             # 1. Doji (Open approx equal to Close)
             body_size = abs(latest["close"] - latest["open"])
             total_range = latest["high"] - latest["low"]
             if total_range > 0 and (body_size / total_range) < 0.1:
-                patterns.append({"name": "Doji", "signal": "neutral", "significance": "potential reversal"})
-                
+                patterns.append(
+                    {
+                        "name": "Doji",
+                        "signal": "neutral",
+                        "significance": "potential reversal",
+                    }
+                )
+
             # 2. Hammer (Small body, long lower shadow)
             lower_shadow = min(latest["open"], latest["close"]) - latest["low"]
-            if total_range > 0 and body_size > 0 and (lower_shadow / body_size) > 2 and (latest["high"] - max(latest["open"], latest["close"])) < body_size:
-                 patterns.append({"name": "Hammer", "signal": "buy", "significance": "bullish reversal"})
-                 
+            if (
+                total_range > 0
+                and body_size > 0
+                and (lower_shadow / body_size) > 2
+                and (latest["high"] - max(latest["open"], latest["close"])) < body_size
+            ):
+                patterns.append(
+                    {
+                        "name": "Hammer",
+                        "signal": "buy",
+                        "significance": "bullish reversal",
+                    }
+                )
+
             # 3. Bullish Engulfing
-            if (prev["close"] < prev["open"] and  # Previous red
-                latest["close"] > latest["open"] and # Current green
-                latest["open"] < prev["close"] and 
-                latest["close"] > prev["open"]):
-                patterns.append({"name": "Bullish Engulfing", "signal": "buy", "significance": "strong bullish"})
+            if (
+                prev["close"] < prev["open"]  # Previous red
+                and latest["close"] > latest["open"]  # Current green
+                and latest["open"] < prev["close"]
+                and latest["close"] > prev["open"]
+            ):
+                patterns.append(
+                    {
+                        "name": "Bullish Engulfing",
+                        "signal": "buy",
+                        "significance": "strong bullish",
+                    }
+                )
 
             return {
                 "symbol": symbol,
@@ -323,15 +362,17 @@ class TechnicalService:
                     "open": float(latest["open"]),
                     "high": float(latest["high"]),
                     "low": float(latest["low"]),
-                    "close": float(latest["close"])
-                }
+                    "close": float(latest["close"]),
+                },
             }
         except Exception as e:
             return {"error": str(e)}
 
-    async def analyze_volume_profile(self, symbol: str, period: str = "90d") -> Dict[str, Any]:
+    async def analyze_volume_profile(
+        self, symbol: str, period: str = "90d"
+    ) -> Dict[str, Any]:
         """Analyze volume profile (Simplified / Visible Range).
-        
+
         Calculates volume distribution across price levels to identify
         high volume nodes (strong support/resistance) and low volume nodes.
         """
@@ -339,40 +380,42 @@ class TechnicalService:
             data = await self._get_price_data(symbol, period)
             if data is None or data.empty:
                 return {"error": "No data"}
-            
+
             # 1. Determine Price Range
             min_price = data["low"].min()
             max_price = data["high"].max()
             price_range = max_price - min_price
-            
+
             if price_range == 0:
                 return {"error": "Price range is zero"}
 
             # 2. Create Bins (e.g., 24 bins)
             num_bins = 24
             bin_size = price_range / num_bins
-            
+
             # Initialize bins
             # Each bin: {'min': float, 'max': float, 'volume': float}
             bins = []
             for i in range(num_bins):
-                bins.append({
-                    "min": min_price + (i * bin_size),
-                    "max": min_price + ((i + 1) * bin_size),
-                    "volume": 0.0
-                })
-            
+                bins.append(
+                    {
+                        "min": min_price + (i * bin_size),
+                        "max": min_price + ((i + 1) * bin_size),
+                        "volume": 0.0,
+                    }
+                )
+
             # 3. Distribute Volume
             # We use Typical Price (H+L+C)/3 to attribute volume
             typical_prices = (data["high"] + data["low"] + data["close"]) / 3
             volumes = data["volume"]
-            
+
             total_volume = 0.0
-            
+
             for price, vol in zip(typical_prices, volumes):
                 if pd.isna(price) or pd.isna(vol):
                     continue
-                    
+
                 # Find bin index
                 bin_idx = int((price - min_price) / bin_size)
                 # Handle edge case where price == max_price
@@ -380,32 +423,32 @@ class TechnicalService:
                     bin_idx = num_bins - 1
                 if bin_idx < 0:
                     bin_idx = 0
-                    
+
                 bins[bin_idx]["volume"] += float(vol)
                 total_volume += float(vol)
-            
+
             # 4. Analyze Results
             # Find POC (Point of Control) - Price level with highest volume
             poc_bin = max(bins, key=lambda x: x["volume"])
             poc_price = (poc_bin["min"] + poc_bin["max"]) / 2
-            
+
             # Calculate Value Area (e.g., 70% of volume)
             # Sort bins by volume descending
             sorted_bins = sorted(bins, key=lambda x: x["volume"], reverse=True)
             accumulated_vol = 0.0
             value_area_vol = total_volume * 0.70
             value_area_bins = []
-            
+
             for b in sorted_bins:
                 accumulated_vol += b["volume"]
                 value_area_bins.append(b)
                 if accumulated_vol >= value_area_vol:
                     break
-            
+
             # Determine Value Area High (VAH) and Low (VAL)
             vah = max(b["max"] for b in value_area_bins)
             val = min(b["min"] for b in value_area_bins)
-            
+
             # Current price relation
             current_price = float(data["close"].iloc[-1])
             status = "inside_value_area"
@@ -418,14 +461,10 @@ class TechnicalService:
                 "symbol": symbol,
                 "period": period,
                 "poc_price": poc_price,  # Point of Control (Strongest Support/Resistance)
-                "value_area": {
-                    "high": vah,
-                    "low": val,
-                    "coverage": "70%"
-                },
+                "value_area": {"high": vah, "low": val, "coverage": "70%"},
                 "current_price": current_price,
                 "status": status,
-                "volume_profile": bins  # Full distribution for visualization
+                "volume_profile": bins,  # Full distribution for visualization
             }
 
         except Exception as e:
