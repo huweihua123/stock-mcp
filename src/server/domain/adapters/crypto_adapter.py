@@ -16,8 +16,6 @@ from src.server.domain.types import (
     AdapterCapability,
     Asset,
     AssetPrice,
-    AssetSearchQuery,
-    AssetSearchResult,
     AssetType,
     DataSource,
     Exchange,
@@ -236,40 +234,4 @@ class CryptoAdapter(BaseDataAdapter):
             return prices
         except Exception as e:
             self.logger.error(f"Failed to fetch history for {ticker}: {e}")
-            return []
-
-    async def search_assets(self, query: AssetSearchQuery) -> List[AssetSearchResult]:
-        """Search cryptocurrencies."""
-        cache_key = f"crypto:search:{query.query}"
-        cached = await self.cache.get(cache_key)
-        if cached:
-            return [AssetSearchResult(**item) for item in cached]
-
-        url = f"https://api.coingecko.com/api/v3/search?query={query.query}"
-
-        try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(url, timeout=30)
-                resp.raise_for_status()
-                data = resp.json()
-
-            results = []
-            for coin in data.get("coins", [])[: query.limit]:
-                internal_ticker = self.convert_to_internal_ticker(coin.get("id", ""))
-                results.append(
-                    AssetSearchResult(
-                        ticker=internal_ticker,
-                        asset_type=AssetType.CRYPTO,
-                        name=coin.get("name", ""),
-                        exchange="CRYPTO",
-                        country="Global",
-                        currency="USD",
-                        relevance_score=1.0,  # Simple score
-                    )
-                )
-
-            await self.cache.set(cache_key, [r.model_dump() for r in results], ttl=3600)
-            return results
-        except Exception as e:
-            self.logger.warning(f"Crypto search failed: {e}")
             return []

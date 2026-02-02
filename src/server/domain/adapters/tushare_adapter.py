@@ -16,8 +16,6 @@ from src.server.domain.types import (
     AdapterCapability,
     Asset,
     AssetPrice,
-    AssetSearchQuery,
-    AssetSearchResult,
     AssetType,
     DataSource,
     Exchange,
@@ -278,66 +276,6 @@ class TushareAdapter(BaseDataAdapter):
             self.logger.error(f"Failed to get history for {ticker}: {e}")
             return []
 
-    async def search_assets(self, query: AssetSearchQuery) -> List[AssetSearchResult]:
-        """Search assets."""
-        client = self.tushare_conn.get_client()
-        if client is None:
-            return []
-
-        cache_key = "tushare:stock_basic"
-        basic_data = await self.cache.get(cache_key)
-
-        if not basic_data:
-            self.logger.info("Fetching stock_basic from Tushare...")
-            try:
-                df = await self._run(
-                    client.stock_basic,
-                    exchange="",
-                    list_status="L",
-                    fields="ts_code,symbol,name,market",
-                )
-                basic_data = df.to_dict("records")
-                await self.cache.set(cache_key, basic_data, ttl=86400)
-            except Exception as e:
-                self.logger.error(f"Failed to fetch stock_basic: {e}")
-                return []
-
-        results = []
-        q = query.query.upper()
-        limit = query.limit or 10
-
-        for item in basic_data:
-            ts_code = item.get("ts_code", "")
-            name = item.get("name", "")
-            symbol = item.get("symbol", "")
-
-            if q in name or q in symbol or q in ts_code:
-                internal_ticker = self.convert_to_internal_ticker(ts_code)
-
-                results.append(
-                    AssetSearchResult(
-                        ticker=internal_ticker,
-                        name=name,
-                        asset_type=AssetType.STOCK,
-                        exchange=(
-                            Exchange.SSE
-                            if ts_code.endswith(".SH")
-                            else (
-                                Exchange.SZSE
-                                if ts_code.endswith(".SZ")
-                                else Exchange.BSE
-                            )
-                        ),
-                        currency="CNY",
-                        source=self.source,
-                    )
-                )
-
-            if len(results) >= limit:
-                break
-
-        return results
-
     async def get_financials(self, ticker: str) -> Dict[str, Any]:
         """Fetch financial statements and metrics from Tushare.
 
@@ -353,7 +291,8 @@ class TushareAdapter(BaseDataAdapter):
         Returns:
             Dictionary containing financial data
         """
-        cache_key = f"tushare:financials:{ticker}:v2"
+        # v3: increase history depth to support multi-year charts
+        cache_key = f"tushare:financials:{ticker}:v3"
         cached = await self.cache.get(cache_key)
         if cached:
             return cached
@@ -412,21 +351,25 @@ class TushareAdapter(BaseDataAdapter):
             )
 
             # Helper function to convert DataFrame to serializable format
-            def df_to_dict(df):
+            def df_to_dict(df, max_rows: int | None = None):
                 if isinstance(df, Exception):
                     self.logger.warning(f"Failed to fetch financial data: {df}")
                     return None
                 if df is None or df.empty:
                     return None
                 # Convert DataFrame to list of dicts (JSON serializable)
-                # Limit to latest 4 periods (quarters/years)
-                return df.head(4).to_dict("records")
+                if max_rows is not None:
+                    df = df.head(max_rows)
+                return df.to_dict("records")
+
+            # Tushare returns most-recent first; keep enough quarters for ~10 years
+            max_periods = 40
 
             result = {
-                "income_statement": df_to_dict(income_df),
-                "balance_sheet": df_to_dict(balance_df),
-                "cash_flow": df_to_dict(cashflow_df),
-                "financial_indicators": df_to_dict(indicator_df),
+                "income_statement": df_to_dict(income_df, max_periods),
+                "balance_sheet": df_to_dict(balance_df, max_periods),
+                "cash_flow": df_to_dict(cashflow_df, max_periods),
+                "financial_indicators": df_to_dict(indicator_df, max_periods),
                 "market_metrics": df_to_dict(daily_basic_df),
                 "source": "tushare",
                 "ts_code": ts_code,
@@ -434,10 +377,56 @@ class TushareAdapter(BaseDataAdapter):
 
             await self.cache.set(cache_key, result, ttl=3600)
             return result
-
         except Exception as e:
             self.logger.error(f"Failed to fetch financials for {ticker}: {e}")
             raise ValueError(f"Failed to fetch financials for {ticker}: {e}")
+
+    async def get_dividend_info(self, ticker: str) -> Dict[str, Any]:
+        """Fetch dividend history from Tushare.
+
+        Args:
+            ticker: Asset ticker in internal format
+
+        Returns:
+            Dictionary containing dividend history rows
+        """
+        cache_key = f"tushare:dividend:{ticker}:v1"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        client = self.tushare_conn.get_client()
+        if client is None:
+            raise ValueError("Tushare client not available")
+
+        ts_code = self._to_ts_code(ticker)
+
+        try:
+            df = await self._run(
+                client.dividend,
+                ts_code=ts_code,
+                fields=(
+                    "ts_code,end_date,ann_date,div_proc,stk_div,stk_bo_rate,"
+                    "stk_co_rate,cash_div,cash_div_tax,record_date,ex_date,"
+                    "pay_date,div_listdate,imp_ann_date,base_share"
+                ),
+            )
+
+            if df is None or df.empty:
+                result = {"ts_code": ts_code, "rows": []}
+            else:
+                df = df.where(df.notnull(), None)
+                result = {"ts_code": ts_code, "rows": df.to_dict("records")}
+
+            try:
+                await self.cache.set(cache_key, result, ttl=86400)
+            except Exception as cache_error:
+                self.logger.warning(f"Failed to cache dividend data: {cache_error}")
+
+            return result
+        except Exception as e:
+            self.logger.error(f"Failed to fetch dividend info: {e}")
+            raise
 
     async def get_money_flow(self, ticker: str, days: int = 20) -> Dict[str, Any]:
         """获取个股资金流向数据
@@ -691,19 +680,195 @@ class TushareAdapter(BaseDataAdapter):
             self.logger.error(f"Failed to get chip data for {ticker}: {e}")
             raise ValueError(f"Failed to get chip data: {e}")
 
-    async def get_macro_data(self, indicators: List[str] = None) -> Dict[str, Any]:
-        """获取宏观经济数据
+    async def get_money_supply(self) -> Dict[str, Any]:
+        """获取货币供应量数据 (M1/M2)."""
+        client = self.tushare_conn.get_client()
+        if client is None:
+            raise ValueError("Tushare client not available")
 
-        Args:
-            indicators: 指标列表 ["CPI", "PPI", "M2", "GDP"]
+        end_m = datetime.now().strftime("%Y%m")
+        start_m = f"{datetime.now().year - 5}01"
+        cache_key = f"tushare:money_supply:{start_m}-{end_m}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
 
-        Returns:
-            宏观数据
-        """
-        if indicators is None:
-            indicators = ["CPI", "PPI", "M2"]
+        try:
+            df = await self._run(client.cn_m, start_m=start_m, end_m=end_m)
+            if df is None or df.empty:
+                return {"data": [], "component_type": "money_supply", "source": "tushare"}
 
-        cache_key = f"tushare:macro:{'-'.join(sorted(indicators))}"
+            df = df.sort_values("month")
+            df = df.where(df.notnull(), None)
+            data = df.to_dict("records")
+            result = {
+                "component_type": "money_supply",
+                "source": "tushare",
+                "data": data,
+                "summary": {},
+            }
+            await self.cache.set(cache_key, result, ttl=3600)
+            return result
+        except Exception as e:
+            self.logger.error(f"Failed to get money supply: {e}")
+            raise ValueError(f"Failed to get money supply: {e}")
+
+    async def get_inflation_data(self) -> Dict[str, Any]:
+        """获取通胀数据 (CPI/PPI)."""
+        client = self.tushare_conn.get_client()
+        if client is None:
+            raise ValueError("Tushare client not available")
+
+        end_m = datetime.now().strftime("%Y%m")
+        start_m = f"{datetime.now().year - 5}01"
+        cache_key = f"tushare:inflation:{start_m}-{end_m}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        try:
+            cpi_df = await self._run(client.cn_cpi, start_m=start_m, end_m=end_m)
+            ppi_df = await self._run(client.cn_ppi, start_m=start_m, end_m=end_m)
+
+            result = {
+                "component_type": "inflation_data",
+                "source": "tushare",
+                "data": {
+                    "CPI": cpi_df.where(cpi_df.notnull(), None).to_dict("records") if cpi_df is not None else [],
+                    "PPI": ppi_df.where(ppi_df.notnull(), None).to_dict("records") if ppi_df is not None else [],
+                },
+            }
+            await self.cache.set(cache_key, result, ttl=3600)
+            return result
+        except Exception as e:
+            self.logger.error(f"Failed to get inflation data: {e}")
+            raise ValueError(f"Failed to get inflation data: {e}")
+
+    async def get_pmi_data(self) -> Dict[str, Any]:
+        """获取 PMI 数据."""
+        client = self.tushare_conn.get_client()
+        if client is None:
+            raise ValueError("Tushare client not available")
+
+        end_m = datetime.now().strftime("%Y%m")
+        start_m = f"{datetime.now().year - 5}01"
+        cache_key = f"tushare:pmi:{start_m}-{end_m}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        try:
+            df = await self._run(client.cn_pmi, start_m=start_m, end_m=end_m)
+            data = []
+            if df is not None and not df.empty:
+                data = df.where(df.notnull(), None).to_dict("records")
+            result = {
+                "component_type": "pmi_data",
+                "source": "tushare",
+                "data": data,
+            }
+            await self.cache.set(cache_key, result, ttl=3600)
+            return result
+        except Exception as e:
+            self.logger.error(f"Failed to get PMI data: {e}")
+            raise ValueError(f"Failed to get PMI data: {e}")
+
+    async def get_gdp_data(self) -> Dict[str, Any]:
+        """获取 GDP 数据."""
+        client = self.tushare_conn.get_client()
+        if client is None:
+            raise ValueError("Tushare client not available")
+
+        start_q = f"{datetime.now().year - 5}Q1"
+        end_q = f"{datetime.now().year}Q4"
+        cache_key = f"tushare:gdp:{start_q}-{end_q}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        try:
+            df = await self._run(client.cn_gdp, start_q=start_q, end_q=end_q)
+            data = []
+            if df is not None and not df.empty:
+                data = df.where(df.notnull(), None).to_dict("records")
+            result = {
+                "component_type": "gdp_data",
+                "source": "tushare",
+                "data": data,
+            }
+            await self.cache.set(cache_key, result, ttl=3600)
+            return result
+        except Exception as e:
+            self.logger.error(f"Failed to get GDP data: {e}")
+            raise ValueError(f"Failed to get GDP data: {e}")
+
+    async def get_social_financing(self) -> Dict[str, Any]:
+        """获取社会融资数据."""
+        client = self.tushare_conn.get_client()
+        if client is None:
+            raise ValueError("Tushare client not available")
+
+        end_m = datetime.now().strftime("%Y%m")
+        start_m = f"{datetime.now().year - 5}01"
+        cache_key = f"tushare:social_financing:{start_m}-{end_m}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        try:
+            df = await self._run(client.cn_sf, start_m=start_m, end_m=end_m)
+            data = []
+            if df is not None and not df.empty:
+                data = df.where(df.notnull(), None).to_dict("records")
+            result = {
+                "component_type": "social_financing",
+                "source": "tushare",
+                "data": data,
+            }
+            await self.cache.set(cache_key, result, ttl=3600)
+            return result
+        except Exception as e:
+            self.logger.error(f"Failed to get social financing: {e}")
+            raise ValueError(f"Failed to get social financing: {e}")
+
+    async def get_interest_rates(self) -> Dict[str, Any]:
+        """获取利率数据 (SHIBOR + LPR)."""
+        client = self.tushare_conn.get_client()
+        if client is None:
+            raise ValueError("Tushare client not available")
+
+        end_m = datetime.now().strftime("%Y%m")
+        start_m = f"{datetime.now().year - 5}01"
+        cache_key = f"tushare:interest_rates:{start_m}-{end_m}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        try:
+            shibor_df = await self._run(
+                client.shibor,
+                start_date=(datetime.now() - timedelta(days=370)).strftime("%Y%m%d"),
+                end_date=datetime.now().strftime("%Y%m%d"),
+            )
+            lpr_df = await self._run(client.lpr, start_m=start_m, end_m=end_m)
+
+            result = {
+                "component_type": "interest_rates",
+                "source": "tushare",
+                "data": {
+                    "shibor": shibor_df.where(shibor_df.notnull(), None).to_dict("records") if shibor_df is not None else [],
+                    "lpr": lpr_df.where(lpr_df.notnull(), None).to_dict("records") if lpr_df is not None else [],
+                },
+            }
+            await self.cache.set(cache_key, result, ttl=3600)
+            return result
+        except Exception as e:
+            self.logger.error(f"Failed to get interest rates: {e}")
+            raise ValueError(f"Failed to get interest rates: {e}")
+
+    async def get_market_liquidity(self, days: int = 60) -> Dict[str, Any]:
+        """获取市场流动性数据 (北向资金 + 融资融券)."""
+        cache_key = f"tushare:market_liquidity:{days}"
         cached = await self.cache.get(cache_key)
         if cached:
             return cached
@@ -712,92 +877,240 @@ class TushareAdapter(BaseDataAdapter):
         if client is None:
             raise ValueError("Tushare client not available")
 
-        result = {
-            "component_type": "macro_indicators",
-            "source": "tushare",
-            "data": {},
-            "timestamp": datetime.now().isoformat(),
-        }
+        try:
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=days + 10)
+
+            north_df = await self._run(
+                client.moneyflow_hsgt,
+                start_date=start_date.strftime("%Y%m%d"),
+                end_date=end_date.strftime("%Y%m%d"),
+            )
+            margin_df = await self._run(
+                client.margin_detail,
+                start_date=start_date.strftime("%Y%m%d"),
+                end_date=end_date.strftime("%Y%m%d"),
+            )
+
+            north_flow = []
+            if north_df is not None and not north_df.empty:
+                north_df = north_df.sort_values("trade_date").tail(days)
+                north_flow = north_df.where(north_df.notnull(), None).to_dict("records")
+
+            margin = []
+            if margin_df is not None and not margin_df.empty:
+                margin_df = margin_df.sort_values("trade_date").tail(days)
+                margin = margin_df.where(margin_df.notnull(), None).to_dict("records")
+
+            result = {
+                "component_type": "market_liquidity",
+                "source": "tushare",
+                "data": {
+                    "north_flow": north_flow,
+                    "margin": margin,
+                },
+            }
+
+            await self.cache.set(cache_key, result, ttl=1800)
+            return result
+        except Exception as e:
+            self.logger.error(f"Failed to get market liquidity: {e}")
+            raise ValueError(f"Failed to get market liquidity: {e}")
+
+    async def get_market_money_flow(self, trade_date: Optional[str] = None) -> Dict[str, Any]:
+        """获取市场资金流向数据."""
+        cache_key = f"tushare:market_money_flow:{trade_date or 'latest'}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        client = self.tushare_conn.get_client()
+        if client is None:
+            raise ValueError("Tushare client not available")
 
         try:
-            # CPI 数据
-            if "CPI" in indicators:
-                try:
-                    cpi_df = await self._run(
-                        client.cn_cpi,
-                        start_m="202301",
-                        end_m=datetime.now().strftime("%Y%m"),
+            if trade_date:
+                df = await self._run(client.moneyflow_mkt, trade_date=trade_date)
+            else:
+                df = await self._run(
+                    client.moneyflow_mkt,
+                    trade_date=datetime.now().strftime("%Y%m%d"),
+                )
+                if df is None or df.empty:
+                    df = await self._run(
+                        client.moneyflow_mkt,
+                        trade_date=(datetime.now() - timedelta(days=1)).strftime("%Y%m%d"),
                     )
-                    if cpi_df is not None and not cpi_df.empty:
-                        cpi_df = cpi_df.sort_values("month").tail(12)
-                        result["data"]["CPI"] = {
-                            "months": cpi_df["month"].tolist(),
-                            "values": cpi_df["nt_yoy"].fillna(0).tolist(),
-                            "latest": float(cpi_df["nt_yoy"].iloc[-1]),
-                        }
-                except Exception as e:
-                    self.logger.warning(f"Failed to get CPI: {e}")
 
-            # PPI 数据
-            if "PPI" in indicators:
-                try:
-                    ppi_df = await self._run(
-                        client.cn_ppi,
-                        start_m="202301",
-                        end_m=datetime.now().strftime("%Y%m"),
-                    )
-                    if ppi_df is not None and not ppi_df.empty:
-                        ppi_df = ppi_df.sort_values("month").tail(12)
-                        result["data"]["PPI"] = {
-                            "months": ppi_df["month"].tolist(),
-                            "values": ppi_df["ppi_yoy"].fillna(0).tolist(),
-                            "latest": float(ppi_df["ppi_yoy"].iloc[-1]),
-                        }
-                except Exception as e:
-                    self.logger.warning(f"Failed to get PPI: {e}")
+            data = []
+            if df is not None and not df.empty:
+                data = df.where(df.notnull(), None).to_dict("records")
 
-            # M2 货币供应量
-            if "M2" in indicators:
-                try:
-                    m2_df = await self._run(
-                        client.cn_m,
-                        start_m="202301",
-                        end_m=datetime.now().strftime("%Y%m"),
-                    )
-                    if m2_df is not None and not m2_df.empty:
-                        m2_df = m2_df.sort_values("month").tail(12)
-                        result["data"]["M2"] = {
-                            "months": m2_df["month"].tolist(),
-                            "values": m2_df["m2_yoy"].fillna(0).tolist(),
-                            "latest": float(m2_df["m2_yoy"].iloc[-1]),
-                        }
-                except Exception as e:
-                    self.logger.warning(f"Failed to get M2: {e}")
+            result = {
+                "component_type": "market_money_flow",
+                "source": "tushare",
+                "data": data,
+            }
+            await self.cache.set(cache_key, result, ttl=1800)
+            return result
+        except Exception as e:
+            self.logger.error(f"Failed to get market money flow: {e}")
+            raise ValueError(f"Failed to get market money flow: {e}")
 
-            # GDP 数据 (季度)
-            if "GDP" in indicators:
-                try:
-                    gdp_df = await self._run(
-                        client.cn_gdp,
-                        start_q="2023Q1",
-                        end_q=f"{datetime.now().year}Q4",
-                    )
-                    if gdp_df is not None and not gdp_df.empty:
-                        gdp_df = gdp_df.sort_values("quarter").tail(8)
-                        result["data"]["GDP"] = {
-                            "quarters": gdp_df["quarter"].tolist(),
-                            "values": gdp_df["gdp_yoy"].fillna(0).tolist(),
-                            "latest": float(gdp_df["gdp_yoy"].iloc[-1]),
-                        }
-                except Exception as e:
-                    self.logger.warning(f"Failed to get GDP: {e}")
+    async def get_sector_trend(self, sector_name: str, days: int = 10) -> Dict[str, Any]:
+        """获取板块走势数据."""
+        cache_key = f"tushare:sector_trend:{sector_name}:{days}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
 
+        client = self.tushare_conn.get_client()
+        if client is None:
+            raise ValueError("Tushare client not available")
+
+        try:
+            index_df = await self._run(client.ths_index, name=sector_name)
+            if index_df is None or index_df.empty:
+                raise ValueError(f"No sector index found for {sector_name}")
+
+            index_code = index_df.iloc[0].get("ts_code")
+            if not index_code:
+                raise ValueError(f"No ts_code for sector {sector_name}")
+
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=days + 10)
+
+            daily_df = await self._run(
+                client.ths_daily,
+                ts_code=index_code,
+                start_date=start_date.strftime("%Y%m%d"),
+                end_date=end_date.strftime("%Y%m%d"),
+            )
+
+            if daily_df is None or daily_df.empty:
+                raise ValueError(f"No sector daily data for {sector_name}")
+
+            daily_df = daily_df.sort_values("trade_date").tail(days)
+            daily_df = daily_df.where(daily_df.notnull(), None)
+            trend = daily_df.to_dict("records")
+            total_pct_chg = float(daily_df["pct_chg"].fillna(0).sum()) if "pct_chg" in daily_df else 0.0
+
+            result = {
+                "component_type": "sector_trend",
+                "source": "tushare",
+                "sector_name": sector_name,
+                "days": days,
+                "total_pct_chg": total_pct_chg,
+                "trend": trend,
+            }
+
+            await self.cache.set(cache_key, result, ttl=1800)
+            return result
+        except Exception as e:
+            self.logger.error(f"Failed to get sector trend: {e}")
+            raise ValueError(f"Failed to get sector trend: {e}")
+
+    async def get_ggt_daily(self, days: int = 60) -> Dict[str, Any]:
+        """获取港股通每日成交统计."""
+        cache_key = f"tushare:ggt_daily:{days}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        client = self.tushare_conn.get_client()
+        if client is None:
+            raise ValueError("Tushare client not available")
+
+        try:
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=days + 10)
+
+            df = await self._run(
+                client.ggt_daily,
+                start_date=start_date.strftime("%Y%m%d"),
+                end_date=end_date.strftime("%Y%m%d"),
+            )
+
+            rows = []
+            if df is not None and not df.empty:
+                df = df.sort_values("trade_date").tail(days)
+                rows = df.where(df.notnull(), None).to_dict("records")
+
+            result = {
+                "component_type": "ggt_daily",
+                "source": "tushare",
+                "data": rows,
+            }
+            await self.cache.set(cache_key, result, ttl=1800)
+            return result
+        except Exception as e:
+            self.logger.error(f"Failed to get ggt daily: {e}")
+            raise ValueError(f"Failed to get ggt daily: {e}")
+
+    async def get_mainbz_info(self, ticker: str) -> Dict[str, Any]:
+        """获取主营业务构成."""
+        cache_key = f"tushare:mainbz:{ticker}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        client = self.tushare_conn.get_client()
+        if client is None:
+            raise ValueError("Tushare client not available")
+
+        ts_code = self._to_ts_code(ticker)
+        try:
+            df = await self._run(client.fina_mainbz, ts_code=ts_code)
+            rows = []
+            if df is not None and not df.empty:
+                df = df.sort_values("end_date", ascending=False)
+                rows = df.where(df.notnull(), None).to_dict("records")
+            result = {
+                "component_type": "mainbz_info",
+                "source": "tushare",
+                "ts_code": ts_code,
+                "rows": rows,
+            }
             await self.cache.set(cache_key, result, ttl=3600)
             return result
-
         except Exception as e:
-            self.logger.error(f"Failed to get macro data: {e}")
-            raise ValueError(f"Failed to get macro data: {e}")
+            self.logger.error(f"Failed to get main business info: {e}")
+            raise ValueError(f"Failed to get main business info: {e}")
+
+    async def get_shareholder_info(self, ticker: str) -> Dict[str, Any]:
+        """获取股东信息."""
+        cache_key = f"tushare:shareholder:{ticker}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        client = self.tushare_conn.get_client()
+        if client is None:
+            raise ValueError("Tushare client not available")
+
+        ts_code = self._to_ts_code(ticker)
+        try:
+            holders_df = await self._run(client.top10_holders, ts_code=ts_code)
+            float_df = await self._run(client.top10_floatholders, ts_code=ts_code)
+            number_df = await self._run(client.stk_holdernumber, ts_code=ts_code)
+            trade_df = await self._run(client.stk_holdertrade, ts_code=ts_code)
+
+            result = {
+                "component_type": "shareholder_info",
+                "source": "tushare",
+                "ts_code": ts_code,
+                "data": {
+                    "top10_holders": holders_df.where(holders_df.notnull(), None).to_dict("records") if holders_df is not None else [],
+                    "top10_floatholders": float_df.where(float_df.notnull(), None).to_dict("records") if float_df is not None else [],
+                    "holder_number": number_df.where(number_df.notnull(), None).to_dict("records") if number_df is not None else [],
+                    "holder_trade": trade_df.where(trade_df.notnull(), None).to_dict("records") if trade_df is not None else [],
+                },
+            }
+            await self.cache.set(cache_key, result, ttl=3600)
+            return result
+        except Exception as e:
+            self.logger.error(f"Failed to get shareholder info: {e}")
+            raise ValueError(f"Failed to get shareholder info: {e}")
 
     async def get_technical_indicators(
         self,
@@ -862,15 +1175,21 @@ class TushareAdapter(BaseDataAdapter):
             "close": df["close"].tolist(),
             "indicators": {},
             "source": "tushare",
-            "ticker": ticker
+            "ticker": ticker,
+            "ts_code": self._to_ts_code(ticker),
         }
 
         try:
+            def _series_to_list(series: pd.Series) -> List[Optional[float]]:
+                return series.where(pd.notnull(series), None).tolist()
+
             # MA (Moving Average)
             if "MA" in indicators:
                 ma_data = {}
                 for window in [5, 10, 20, 30, 60]:
-                    ma_data[f"ma{window}"] = df["close"].rolling(window=window).mean().fillna(0).tolist()
+                    ma_data[f"ma{window}"] = _series_to_list(
+                        df["close"].rolling(window=window).mean()
+                    )
                 result["indicators"]["ma"] = ma_data
 
             # MACD
@@ -882,9 +1201,9 @@ class TushareAdapter(BaseDataAdapter):
                 hist = (macd - signal) * 2
                 
                 result["indicators"]["macd"] = {
-                    "diff": macd.fillna(0).tolist(),
-                    "dea": signal.fillna(0).tolist(),
-                    "hist": hist.fillna(0).tolist()
+                    "diff": _series_to_list(macd),
+                    "dea": _series_to_list(signal),
+                    "hist": _series_to_list(hist)
                 }
 
             # KDJ
@@ -926,14 +1245,45 @@ class TushareAdapter(BaseDataAdapter):
                 loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
                 rs = gain / loss
                 rsi = 100 - (100 / (1 + rs))
-                result["indicators"]["rsi"] = rsi.fillna(0).tolist()
+                result["indicators"]["rsi"] = _series_to_list(rsi)
 
             # VOL (Volume MA)
             if "VOL" in indicators:
                 vol_data = {"volume": df["volume"].tolist()}
                 for window in [5, 10, 20]:
-                    vol_data[f"ma{window}"] = df["volume"].rolling(window=window).mean().fillna(0).tolist()
+                    vol_data[f"ma{window}"] = _series_to_list(
+                        df["volume"].rolling(window=window).mean()
+                    )
                 result["indicators"]["vol"] = vol_data
+
+            # Build per-day rows (align with common front-end expectations)
+            rows = []
+            for idx, ts in enumerate(df["timestamp"]):
+                row = {
+                    "trade_date": ts.strftime("%Y%m%d"),
+                    "close": df["close"].iloc[idx],
+                }
+                ma = result["indicators"].get("ma", {})
+                macd_ind = result["indicators"].get("macd", {})
+                kdj = result["indicators"].get("kdj", {})
+                rsi_list = result["indicators"].get("rsi", [])
+
+                row.update({
+                    "MA5": ma.get("ma5", [None] * len(df)).__getitem__(idx),
+                    "MA10": ma.get("ma10", [None] * len(df)).__getitem__(idx),
+                    "MA20": ma.get("ma20", [None] * len(df)).__getitem__(idx),
+                    "MA60": ma.get("ma60", [None] * len(df)).__getitem__(idx),
+                    "MACD": macd_ind.get("diff", [None] * len(df)).__getitem__(idx),
+                    "MACD_signal": macd_ind.get("dea", [None] * len(df)).__getitem__(idx),
+                    "RSI": rsi_list[idx] if idx < len(rsi_list) else None,
+                    "K": kdj.get("k", [None] * len(df)).__getitem__(idx),
+                    "D": kdj.get("d", [None] * len(df)).__getitem__(idx),
+                    "J": kdj.get("j", [None] * len(df)).__getitem__(idx),
+                })
+                rows.append(row)
+
+            result["rows"] = rows
+            result["current_price"] = float(df["close"].iloc[-1])
 
             return result
 

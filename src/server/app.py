@@ -18,6 +18,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.server.mcp.server import create_mcp_server
+from src.server.mcp.registry import get_enabled_tool_count
+from src.server.core.bootstrap import init_adapters
 from src.server.core.health import router as health_router
 from src.server.api.routes import (
     market_data_router,
@@ -26,7 +28,6 @@ from src.server.api.routes import (
     fundamental_router,
     money_flow_router,
 )
-from src.server.core.dependencies import Container
 from src.server.utils.logger import logger
 
 
@@ -54,69 +55,8 @@ def create_app():
         # Startup
         logger.info("🚀 Starting application")
 
-        # Initialize Redis
-        redis = Container.redis()
-        await redis.connect()
-        logger.info("✅ Redis connection established")
-
-        # Get config
-        config = Container.config()
-
-        # Initialize Tushare connection (only if enabled)
-        tushare_available = False
-        if config.tushare.is_available:
-            tushare = Container.tushare()
-            tushare_available = await tushare.connect()
-            if tushare_available:
-                logger.info("✅ Tushare connection established")
-            else:
-                logger.warning(
-                    "⚠️ Tushare connection failed - will use fallback adapters"
-                )
-        else:
-            logger.info(
-                "ℹ️  Tushare disabled (set TUSHARE_ENABLED=True and provide token to enable)"
-            )
-
-        # Initialize FinnHub connection (only if enabled)
-        finnhub_available = False
-        if config.finnhub.is_available:
-            finnhub = Container.finnhub()
-            await finnhub.connect()
-            finnhub_available = True
-            logger.info("✅ FinnHub connection established")
-        else:
-            logger.info(
-                "ℹ️  FinnHub disabled (set FINNHUB_ENABLED=True and provide API key to enable)"
-            )
-
-        # Initialize Baostock connection
-        baostock = Container.baostock()
-        await baostock.connect()
-        logger.info("✅ Baostock connection established")
-
-        # Register adapters
-        logger.info("📦 Registering data adapters...")
-        adapter_manager = Container.adapter_manager()
-
-        # A股数据源 - 按优先级注册
-        if tushare_available:
-            adapter_manager.register_adapter(Container.tushare_adapter())
-        adapter_manager.register_adapter(Container.akshare_adapter())
-        adapter_manager.register_adapter(Container.baostock_adapter())
-
-        # 加密货币数据源
-        adapter_manager.register_adapter(Container.crypto_adapter())
-        adapter_manager.register_adapter(Container.ccxt_adapter())
-
-        # 美股数据源
-        adapter_manager.register_adapter(Container.yahoo_adapter())
-        if finnhub_available:
-            adapter_manager.register_adapter(Container.finnhub_adapter())
-
-        logger.info(
-            f"✅ All adapters registered (A-share: {'Tushare > ' if tushare_available else ''}Akshare > Baostock)"
-        )
+        # Initialize shared dependencies (connections + adapters)
+        await init_adapters()
 
         # Integrate MCP lifespan if available
         if mcp_app:
@@ -268,7 +208,7 @@ def create_app():
                     "description": "Model Context Protocol (for AI Agents)",
                     "endpoint": "/mcp",
                     "protocol": "Streamable HTTP (JSON-RPC 2.0)",
-                    "tools_count": 20,
+                    "tools_count": get_enabled_tool_count(),
                 },
             },
             "health_check": "/health",

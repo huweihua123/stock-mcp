@@ -142,27 +142,6 @@ class GetAssetInfoRequest(BaseModel):
     )
 
 
-class SearchAssetsRequest(BaseModel):
-    """资产搜索请求模型"""
-    
-    query: str = Field(
-        ..., 
-        description="搜索关键词 (代码或名称)",
-        examples=["AAPL", "Apple", "Bitcoin"]
-    )
-    asset_types: Optional[List[str]] = Field(
-        default=None,
-        description="资产类型过滤 (stock, etf, crypto, index)",
-        examples=[["stock", "etf"]]
-    )
-    limit: int = Field(
-        default=10,
-        ge=1,
-        le=50,
-        description="最大结果数"
-    )
-
-
 class GenerateTradingSignalRequest(BaseModel):
     """
     生成交易信号请求模型
@@ -230,4 +209,3 @@ class GetFundamentalReportRequest(BaseModel):
         description="股票代码",
         examples=["AAPL", "NASDAQ:AAPL", "600519"]
     )
-

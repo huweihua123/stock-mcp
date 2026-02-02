@@ -19,8 +19,6 @@ from src.server.domain.adapters.base import BaseDataAdapter
 from src.server.domain.types import (
     Asset,
     AssetPrice,
-    AssetSearchQuery,
-    AssetSearchResult,
     AssetType,
     DataSource,
     Exchange,
@@ -186,131 +184,6 @@ class AdapterManager:
 
         logger.warning(f"No suitable adapter found for ticker: {ticker}")
         return None
-
-    def _deduplicate_search_results(
-        self, results: List[AssetSearchResult]
-    ) -> List[AssetSearchResult]:
-        """Smart deduplication of search results to handle cross-exchange duplicates.
-
-        This method handles cases where the same asset appears on multiple exchanges
-        (e.g., AMEX:GORO vs NASDAQ:GORO). It prioritizes certain exchanges and removes
-        likely duplicates based on symbol matching.
-
-        Args:
-            results: List of search results to deduplicate
-
-        Returns:
-            Deduplicated list of search results
-        """
-        # Exchange priority for US stocks (higher number = higher priority)
-        exchange_priority = {
-            "NASDAQ": 3,
-            "NYSE": 2,
-            "AMEX": 1,
-            "HKEX": 3,
-            "SSE": 2,
-            "SZSE": 2,
-            "BSE": 1,
-        }
-
-        seen_tickers = set()
-        # Map: (symbol, country) -> best result so far
-        symbol_map: Dict[tuple, AssetSearchResult] = {}
-
-        for result in results:
-            # Skip exact ticker duplicates
-            if result.ticker in seen_tickers:
-                continue
-
-            try:
-                exchange, symbol = result.ticker.split(":", 1)
-            except ValueError:
-                logger.warning(
-                    f"Invalid ticker format in search result: {result.ticker}"
-                )
-                continue
-
-            # Create a key for cross-exchange deduplication
-            dedup_key = (symbol.upper(), result.country)
-
-            # Check if we've seen this symbol in the same country before
-            if dedup_key in symbol_map:
-                existing_result = symbol_map[dedup_key]
-                existing_exchange = existing_result.ticker.split(":")[0]
-
-                # Compare exchange priorities
-                current_priority = exchange_priority.get(exchange, 0)
-                existing_priority = exchange_priority.get(existing_exchange, 0)
-
-                if current_priority > existing_priority:
-                    symbol_map[dedup_key] = result
-                    logger.debug(
-                        f"Preferring {result.ticker} over {existing_result.ticker} (priority)"
-                    )
-                elif current_priority == existing_priority:
-                    # Same priority, prefer higher relevance score
-                    if result.relevance_score > existing_result.relevance_score:
-                        symbol_map[dedup_key] = result
-                        logger.debug(
-                            f"Preferring {result.ticker} over {existing_result.ticker} (relevance)"
-                        )
-            else:
-                symbol_map[dedup_key] = result
-
-            seen_tickers.add(result.ticker)
-
-        # Convert map back to list
-        unique_results = list(symbol_map.values())
-
-        # Sort by relevance score (descending)
-        unique_results.sort(key=lambda x: x.relevance_score, reverse=True)
-
-        logger.info(
-            f"Deduplicated {len(results)} results to {len(unique_results)} unique assets"
-        )
-
-        return unique_results
-
-    async def search_assets(self, query: AssetSearchQuery) -> List[AssetSearchResult]:
-        """Search for assets across all available adapters.
-
-        Args:
-            query: Search query parameters
-
-        Returns:
-            Combined and deduplicated search results
-        """
-        all_results = []
-
-        # Use all available adapters
-        with self.lock:
-            target_adapters = list(self.adapters.values())
-
-        if not target_adapters:
-            return []
-
-        # Search in parallel across adapters
-        tasks = [adapter.search_assets(query) for adapter in target_adapters]
-        results_list = await asyncio.gather(*tasks, return_exceptions=True)
-
-        for i, result in enumerate(results_list):
-            adapter = target_adapters[i]
-            if isinstance(result, Exception):
-                logger.warning(
-                    f"Search failed for adapter {adapter.source.value}: {result}"
-                )
-            else:
-                all_results.extend(result)
-
-        # Smart deduplication of results
-        unique_results = self._deduplicate_search_results(all_results)
-
-        # TODO: Add LLM fallback search if no results found
-        # if len(unique_results) == 0:
-        #     fallback_results = self._fallback_search_assets(query)
-        #     unique_results = self._deduplicate_search_results(fallback_results)
-
-        return unique_results[: query.limit]
 
     async def get_asset_info(self, ticker: str) -> Optional[Asset]:
         """Get detailed asset information with automatic failover.
@@ -603,7 +476,14 @@ class AdapterManager:
             raise ValueError(f"No adapter found for ticker {ticker}")
 
         try:
-            return await adapter.get_financials(ticker)
+            result = await adapter.get_financials(ticker)
+            # If primary adapter returns empty financials, try failover
+            income = (result or {}).get("income_statement")
+            if income:
+                return result
+            logger.warning(
+                f"Adapter {adapter.source.value} returned empty financials for {ticker}"
+            )
         except Exception as e:
             if isinstance(e, NotImplementedError):
                 logger.warning(
@@ -624,7 +504,13 @@ class AdapterManager:
                         logger.info(
                             f"Trying failover adapter {alt.source.value} for financials of {ticker}"
                         )
-                        return await alt.get_financials(ticker)
+                        alt_result = await alt.get_financials(ticker)
+                        alt_income = (alt_result or {}).get("income_statement")
+                        if alt_income:
+                            return alt_result
+                        logger.warning(
+                            f"Failover adapter {alt.source.value} returned empty financials for {ticker}"
+                        )
                     except Exception as failover_error:
                         logger.warning(
                             f"Failover adapter {alt.source.value} also failed: {failover_error}"
@@ -633,6 +519,77 @@ class AdapterManager:
 
             raise ValueError(
                 f"All adapters failed to fetch financials for {ticker}: {e}"
+            )
+
+        # If we got here, primary adapter returned empty without raising
+        if ":" in ticker:
+            exchange, _ = ticker.split(":", 1)
+            adapters = self.get_adapters_for_exchange(exchange)
+            for alt in adapters:
+                if alt is adapter:
+                    continue
+                try:
+                    logger.info(
+                        f"Trying failover adapter {alt.source.value} for empty financials of {ticker}"
+                    )
+                    alt_result = await alt.get_financials(ticker)
+                    alt_income = (alt_result or {}).get("income_statement")
+                    if alt_income:
+                        return alt_result
+                except Exception as failover_error:
+                    logger.warning(
+                        f"Failover adapter {alt.source.value} also failed: {failover_error}"
+                    )
+                    continue
+
+        return result or {}
+
+    async def get_dividend_info(self, ticker: str) -> Dict:
+        """Fetch dividend history for a ticker.
+
+        Args:
+            ticker: Asset ticker in internal format
+
+        Returns:
+            Dictionary containing dividend history data
+
+        Raises:
+            ValueError: If no adapter found or all adapters failed
+        """
+        adapter = self.get_adapter_for_ticker(ticker)
+        if not adapter:
+            raise ValueError(f"No adapter found for ticker {ticker}")
+
+        try:
+            return await adapter.get_dividend_info(ticker)
+        except Exception as e:
+            if isinstance(e, NotImplementedError):
+                logger.warning(
+                    f"Adapter {adapter.source.value} does not support dividend info"
+                )
+            else:
+                logger.warning(f"Adapter {adapter.source.value} failed: {e}")
+
+            if ":" in ticker:
+                exchange, _ = ticker.split(":", 1)
+                adapters = self.get_adapters_for_exchange(exchange)
+
+                for alt in adapters:
+                    if alt is adapter:
+                        continue
+                    try:
+                        logger.info(
+                            f"Trying failover adapter {alt.source.value} for dividend info of {ticker}"
+                        )
+                        return await alt.get_dividend_info(ticker)
+                    except Exception as failover_error:
+                        logger.warning(
+                            f"Failover adapter {alt.source.value} also failed: {failover_error}"
+                        )
+                        continue
+
+            raise ValueError(
+                f"All adapters failed to fetch dividend info for {ticker}: {e}"
             )
 
     async def get_filings(
@@ -827,36 +784,195 @@ class AdapterManager:
 
         raise ValueError(f"All adapters failed to fetch chip distribution for {ticker}")
 
-    async def get_macro_data(self, indicators: List[str] = None) -> Dict[str, Any]:
-        """获取宏观经济数据 (带自动降级)
-
-        Args:
-            indicators: 指标列表 ["CPI", "PPI", "M2", "GDP"]
-
-        Returns:
-            包含宏观数据的字典
-        """
-        # 宏观数据优先使用 Tushare
-        from src.server.domain.types import DataSource
-
-        if DataSource.TUSHARE in self.adapters:
-            adapter = self.adapters[DataSource.TUSHARE]
-            try:
-                return await adapter.get_macro_data(indicators)
-            except Exception as e:
-                logger.warning(f"Tushare failed for macro data: {e}")
-
-        # Try other adapters
+    async def get_money_supply(self) -> Dict[str, Any]:
+        """获取货币供应量数据 (带自动降级)."""
         for adapter in self._adapter_order:
             try:
-                return await adapter.get_macro_data(indicators)
+                return await adapter.get_money_supply()
             except NotImplementedError:
                 continue
             except Exception as e:
-                logger.warning(f"Adapter {adapter.source.value} failed for macro: {e}")
+                logger.warning(f"Adapter {adapter.source.value} failed for money supply: {e}")
                 continue
+        raise ValueError("No adapter supports money supply data")
 
-        raise ValueError("No adapter supports macro economic data")
+    async def get_inflation_data(self) -> Dict[str, Any]:
+        """获取通胀数据 (带自动降级)."""
+        for adapter in self._adapter_order:
+            try:
+                return await adapter.get_inflation_data()
+            except NotImplementedError:
+                continue
+            except Exception as e:
+                logger.warning(f"Adapter {adapter.source.value} failed for inflation data: {e}")
+                continue
+        raise ValueError("No adapter supports inflation data")
+
+    async def get_pmi_data(self) -> Dict[str, Any]:
+        """获取 PMI 数据 (带自动降级)."""
+        for adapter in self._adapter_order:
+            try:
+                return await adapter.get_pmi_data()
+            except NotImplementedError:
+                continue
+            except Exception as e:
+                logger.warning(f"Adapter {adapter.source.value} failed for PMI data: {e}")
+                continue
+        raise ValueError("No adapter supports PMI data")
+
+    async def get_gdp_data(self) -> Dict[str, Any]:
+        """获取 GDP 数据 (带自动降级)."""
+        for adapter in self._adapter_order:
+            try:
+                return await adapter.get_gdp_data()
+            except NotImplementedError:
+                continue
+            except Exception as e:
+                logger.warning(f"Adapter {adapter.source.value} failed for GDP data: {e}")
+                continue
+        raise ValueError("No adapter supports GDP data")
+
+    async def get_social_financing(self) -> Dict[str, Any]:
+        """获取社融数据 (带自动降级)."""
+        for adapter in self._adapter_order:
+            try:
+                return await adapter.get_social_financing()
+            except NotImplementedError:
+                continue
+            except Exception as e:
+                logger.warning(f"Adapter {adapter.source.value} failed for social financing: {e}")
+                continue
+        raise ValueError("No adapter supports social financing data")
+
+    async def get_interest_rates(self) -> Dict[str, Any]:
+        """获取利率数据 (带自动降级)."""
+        for adapter in self._adapter_order:
+            try:
+                return await adapter.get_interest_rates()
+            except NotImplementedError:
+                continue
+            except Exception as e:
+                logger.warning(f"Adapter {adapter.source.value} failed for interest rates: {e}")
+                continue
+        raise ValueError("No adapter supports interest rate data")
+
+    async def get_market_liquidity(self, days: int = 60) -> Dict[str, Any]:
+        """获取市场流动性数据 (带自动降级)."""
+        for adapter in self._adapter_order:
+            try:
+                return await adapter.get_market_liquidity(days)
+            except NotImplementedError:
+                continue
+            except Exception as e:
+                logger.warning(f"Adapter {adapter.source.value} failed for market liquidity: {e}")
+                continue
+        raise ValueError("No adapter supports market liquidity data")
+
+    async def get_market_money_flow(self, trade_date: Optional[str] = None) -> Dict[str, Any]:
+        """获取市场资金流向 (带自动降级)."""
+        for adapter in self._adapter_order:
+            try:
+                return await adapter.get_market_money_flow(trade_date)
+            except NotImplementedError:
+                continue
+            except Exception as e:
+                logger.warning(f"Adapter {adapter.source.value} failed for market money flow: {e}")
+                continue
+        raise ValueError("No adapter supports market money flow data")
+
+    async def get_sector_trend(self, sector_name: str, days: int = 10) -> Dict[str, Any]:
+        """获取板块走势 (带自动降级)."""
+        for adapter in self._adapter_order:
+            try:
+                return await adapter.get_sector_trend(sector_name, days)
+            except NotImplementedError:
+                continue
+            except Exception as e:
+                logger.warning(f"Adapter {adapter.source.value} failed for sector trend: {e}")
+                continue
+        raise ValueError("No adapter supports sector trend data")
+
+    async def get_ggt_daily(self, days: int = 60) -> Dict[str, Any]:
+        """获取港股通每日成交统计 (带自动降级)."""
+        for adapter in self._adapter_order:
+            try:
+                return await adapter.get_ggt_daily(days)
+            except NotImplementedError:
+                continue
+            except Exception as e:
+                logger.warning(f"Adapter {adapter.source.value} failed for ggt daily: {e}")
+                continue
+        raise ValueError("No adapter supports ggt daily data")
+
+    async def get_mainbz_info(self, ticker: str) -> Dict[str, Any]:
+        """获取主营业务构成 (带自动降级)."""
+        adapter = self.get_adapter_for_ticker(ticker)
+        if not adapter:
+            raise ValueError(f"No adapter found for ticker {ticker}")
+
+        try:
+            return await adapter.get_mainbz_info(ticker)
+        except Exception as e:
+            if isinstance(e, NotImplementedError):
+                logger.warning(f"Adapter {adapter.source.value} does not support mainbz info")
+            else:
+                logger.warning(f"Adapter {adapter.source.value} failed: {e}")
+
+            if ":" in ticker:
+                exchange, _ = ticker.split(":", 1)
+                adapters = self.get_adapters_for_exchange(exchange)
+
+                for alt in adapters:
+                    if alt is adapter:
+                        continue
+                    try:
+                        logger.info(
+                            f"Trying failover adapter {alt.source.value} for mainbz info of {ticker}"
+                        )
+                        return await alt.get_mainbz_info(ticker)
+                    except Exception as failover_error:
+                        logger.warning(
+                            f"Failover adapter {alt.source.value} also failed: {failover_error}"
+                        )
+                        continue
+
+            raise ValueError(f"All adapters failed to fetch mainbz info for {ticker}: {e}")
+
+    async def get_shareholder_info(self, ticker: str) -> Dict[str, Any]:
+        """获取股东信息 (带自动降级)."""
+        adapter = self.get_adapter_for_ticker(ticker)
+        if not adapter:
+            raise ValueError(f"No adapter found for ticker {ticker}")
+
+        try:
+            return await adapter.get_shareholder_info(ticker)
+        except Exception as e:
+            if isinstance(e, NotImplementedError):
+                logger.warning(f"Adapter {adapter.source.value} does not support shareholder info")
+            else:
+                logger.warning(f"Adapter {adapter.source.value} failed: {e}")
+
+            if ":" in ticker:
+                exchange, _ = ticker.split(":", 1)
+                adapters = self.get_adapters_for_exchange(exchange)
+
+                for alt in adapters:
+                    if alt is adapter:
+                        continue
+                    try:
+                        logger.info(
+                            f"Trying failover adapter {alt.source.value} for shareholder info of {ticker}"
+                        )
+                        return await alt.get_shareholder_info(ticker)
+                    except Exception as failover_error:
+                        logger.warning(
+                            f"Failover adapter {alt.source.value} also failed: {failover_error}"
+                        )
+                        continue
+
+            raise ValueError(
+                f"All adapters failed to fetch shareholder info for {ticker}: {e}"
+            )
 
     async def get_technical_indicators(
         self,

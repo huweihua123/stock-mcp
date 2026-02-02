@@ -18,8 +18,6 @@ from src.server.domain.types import (
     AdapterCapability,
     Asset,
     AssetPrice,
-    AssetSearchQuery,
-    AssetSearchResult,
     AssetType,
     DataSource,
     Exchange,
@@ -417,10 +415,6 @@ class YahooAdapter(BaseDataAdapter):
         except Exception as e:
             self.logger.error(f"Failed to fetch history for {ticker}: {e}")
             return []
-
-    async def search_assets(self, query: AssetSearchQuery) -> List[AssetSearchResult]:
-        """Search for assets (Yahoo doesn't support direct search well)."""
-        return []
 
     async def get_financials(self, ticker: str) -> Dict[str, Any]:
         """Fetch financial statements."""

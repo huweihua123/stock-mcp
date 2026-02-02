@@ -16,8 +16,6 @@ from src.server.domain.types import (
     AdapterCapability,
     Asset,
     AssetPrice,
-    AssetSearchQuery,
-    AssetSearchResult,
     AssetType,
     DataSource,
     Exchange,
@@ -227,31 +225,3 @@ class CCXTAdapter(BaseDataAdapter):
         except Exception as e:
             self.logger.error(f"CCXT fetch_ohlcv failed for {symbol}: {e}")
             return []
-
-    async def search_assets(self, query: AssetSearchQuery) -> List[AssetSearchResult]:
-        """Search assets (limited support, mostly checking loaded markets)."""
-        # CCXT doesn't have a global search API like CoinGecko.
-        # We can search within the loaded markets of the default exchange.
-        exchange = await self._get_exchange(self.default_exchange_id)
-        
-        results = []
-        q = query.query.upper()
-        
-        for symbol in exchange.markets:
-            if q in symbol:
-                base, quote = symbol.split("/") if "/" in symbol else (symbol, "")
-                internal_ticker = self.convert_to_internal_ticker(symbol)
-                
-                results.append(AssetSearchResult(
-                    ticker=internal_ticker,
-                    asset_type=AssetType.CRYPTO,
-                    name=symbol,
-                    exchange=self.default_exchange_id.upper(),
-                    country="Global",
-                    currency=quote,
-                    relevance_score=1.0 if symbol == q else 0.5
-                ))
-                if len(results) >= query.limit:
-                    break
-                    
-        return results

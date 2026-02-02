@@ -16,8 +16,6 @@ from src.server.domain.types import (
     AdapterCapability,
     Asset,
     AssetPrice,
-    AssetSearchQuery,
-    AssetSearchResult,
     AssetType,
     DataSource,
     Exchange,
@@ -249,51 +247,6 @@ class FinnhubAdapter(BaseDataAdapter):
             return prices
         except Exception as e:
             self.logger.error(f"Failed to fetch history for {ticker}: {e}")
-            return []
-
-    async def search_assets(self, query: AssetSearchQuery) -> List[AssetSearchResult]:
-        """Search for assets."""
-        session = self.finnhub_conn.get_client()
-        if not session:
-            return []
-
-        base_url = self.finnhub_conn.get_base_url()
-        api_key = self.finnhub_conn.get_api_key()
-
-        try:
-
-            def fetch_search():
-                url = f"{base_url}/search"
-                params = {"q": query.query, "token": api_key}
-                resp = session.get(url, params=params, timeout=10)
-                if resp.status_code == 200:
-                    return resp.json()
-                return {}
-
-            data = await self._run(fetch_search)
-            if not data or "result" not in data:
-                return []
-
-            results = []
-            for item in data["result"][: query.limit]:
-                # Filter out non-US if needed, or just return all
-                symbol = item.get("symbol")
-                if not symbol or "." in symbol:  # Simple filter for common stocks
-                    continue
-
-                results.append(
-                    AssetSearchResult(
-                        ticker=f"NASDAQ:{symbol}",  # Default assumption
-                        asset_type=AssetType.STOCK,
-                        name=item.get("description", ""),
-                        exchange="US",  # Finnhub doesn't always give exchange in search
-                        country="US",
-                        relevance_score=1.0,  # No score provided
-                    )
-                )
-            return results
-        except Exception as e:
-            self.logger.warning(f"Search failed: {e}")
             return []
 
     async def get_filings(

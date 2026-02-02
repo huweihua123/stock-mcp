@@ -14,8 +14,6 @@ from src.server.domain.types import (
     AdapterCapability,
     Asset,
     AssetPrice,
-    AssetSearchQuery,
-    AssetSearchResult,
     AssetType,
     DataSource,
     Exchange,
@@ -31,7 +29,6 @@ class BaseDataAdapter(abc.ABC):
     - get_asset_info: Fetch detailed asset info
     - get_real_time_price: Fetch current price
     - get_historical_prices: Fetch historical data
-    - search_assets: Search for assets
     - get_capabilities: Declare supported asset types and exchanges
     """
 
@@ -117,18 +114,6 @@ class BaseDataAdapter(abc.ABC):
         """
         pass
 
-    @abc.abstractmethod
-    async def search_assets(self, query: AssetSearchQuery) -> List[AssetSearchResult]:
-        """Search for assets.
-
-        Args:
-            query: Search query parameters
-
-        Returns:
-            List of search results
-        """
-        pass
-
     async def get_filings(
         self,
         ticker: str,
@@ -151,6 +136,19 @@ class BaseDataAdapter(abc.ABC):
         """
         raise NotImplementedError(
             f"{self.source.value} does not support get_financials"
+        )
+
+    async def get_dividend_info(self, ticker: str) -> Dict[str, Any]:
+        """Optional method to fetch dividend history info.
+
+        Args:
+            ticker: Asset ticker in internal format
+
+        Returns:
+            Dictionary containing dividend history data
+        """
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_dividend_info"
         )
 
     async def get_money_flow(self, ticker: str, days: int = 20) -> Dict[str, Any]:
@@ -196,17 +194,76 @@ class BaseDataAdapter(abc.ABC):
             f"{self.source.value} does not support get_chip_distribution"
         )
 
-    async def get_macro_data(self, indicators: List[str] = None) -> Dict[str, Any]:
-        """获取宏观经济数据 (Optional)
-
-        Args:
-            indicators: 指标列表 ["CPI", "PPI", "M2", "GDP"]
-
-        Returns:
-            包含宏观数据的字典
-        """
+    async def get_money_supply(self) -> Dict[str, Any]:
+        """获取货币供应量数据 (Optional)."""
         raise NotImplementedError(
-            f"{self.source.value} does not support get_macro_data"
+            f"{self.source.value} does not support get_money_supply"
+        )
+
+    async def get_inflation_data(self) -> Dict[str, Any]:
+        """获取通胀数据 (Optional)."""
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_inflation_data"
+        )
+
+    async def get_pmi_data(self) -> Dict[str, Any]:
+        """获取 PMI 数据 (Optional)."""
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_pmi_data"
+        )
+
+    async def get_gdp_data(self) -> Dict[str, Any]:
+        """获取 GDP 数据 (Optional)."""
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_gdp_data"
+        )
+
+    async def get_social_financing(self) -> Dict[str, Any]:
+        """获取社融数据 (Optional)."""
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_social_financing"
+        )
+
+    async def get_interest_rates(self) -> Dict[str, Any]:
+        """获取利率数据 (Optional)."""
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_interest_rates"
+        )
+
+    async def get_market_liquidity(self, days: int = 60) -> Dict[str, Any]:
+        """获取市场流动性数据 (Optional)."""
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_market_liquidity"
+        )
+
+    async def get_market_money_flow(self, trade_date: Optional[str] = None) -> Dict[str, Any]:
+        """获取市场资金流向数据 (Optional)."""
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_market_money_flow"
+        )
+
+    async def get_sector_trend(self, sector_name: str, days: int = 10) -> Dict[str, Any]:
+        """获取板块走势数据 (Optional)."""
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_sector_trend"
+        )
+
+    async def get_ggt_daily(self, days: int = 60) -> Dict[str, Any]:
+        """获取港股通每日成交统计 (Optional)."""
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_ggt_daily"
+        )
+
+    async def get_mainbz_info(self, ticker: str) -> Dict[str, Any]:
+        """获取主营业务构成 (Optional)."""
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_mainbz_info"
+        )
+
+    async def get_shareholder_info(self, ticker: str) -> Dict[str, Any]:
+        """获取股东信息 (Optional)."""
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_shareholder_info"
         )
 
     async def get_technical_indicators(

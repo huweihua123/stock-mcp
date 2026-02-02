@@ -5,7 +5,7 @@ Provides RESTful HTTP endpoints for:
 - Batch price queries
 - Technical indicators calculation
 - Historical prices (K-line data)
-- Asset info and search
+ - Asset info
 - Trading signals
 - Support/resistance levels
 """
@@ -14,18 +14,14 @@ from fastapi import APIRouter, HTTPException, status, Query
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from src.server.utils.logger import logger
-
-# 导入核心实现函数
-from src.server.mcp.tools.asset_tools import get_multiple_prices_impl
-from src.server.mcp.tools.technical_tools import calculate_technical_indicators_impl
-from src.server.core.dependencies import Container
+from src.server.core.use_cases import market as market_use_cases
+from src.server.core.use_cases import technical as technical_use_cases
 
 # 导入请求模型
 from src.server.api.models.requests import (
     GetMultiplePricesRequest,
     CalculateTechnicalIndicatorsRequest,
     GetHistoricalPricesRequest,
-    SearchAssetsRequest,
     GenerateTradingSignalRequest,
     CalculateSupportResistanceRequest,
 )
@@ -112,7 +108,7 @@ async def get_multiple_prices(
         )
         
         # 调用核心实现
-        result = await get_multiple_prices_impl(request.tickers)
+        result = await market_use_cases.get_multiple_prices(request.tickers)
         
         # 统计成功/失败数量
         success_count = len([v for v in result.values() if v and "error" not in v])
@@ -231,10 +227,10 @@ async def calculate_technical_indicators(
         )
         
         # 调用核心实现
-        result = await calculate_technical_indicators_impl(
+        result = await technical_use_cases.calculate_technical_indicators(
             symbol=request.symbol,
             period=request.period,
-            interval=request.interval
+            interval=request.interval,
         )
         
         logger.info(
@@ -284,14 +280,12 @@ async def get_historical_prices(
             interval=request.interval
         )
         
-        manager = Container.adapter_manager()
-        
         # 解析 period 为日期范围
         period_days = _parse_period_to_days(request.period)
         end_date = datetime.now()
         start_date = end_date - timedelta(days=period_days)
         
-        prices = await manager.get_historical_prices(
+        prices = await market_use_cases.get_historical_prices(
             ticker=request.symbol,
             start_date=start_date,
             end_date=end_date,
@@ -334,8 +328,7 @@ async def get_asset_info(
     try:
         logger.info("API: get_asset_info called", symbol=symbol)
         
-        manager = Container.adapter_manager()
-        asset = await manager.get_asset_info(symbol)
+        asset = await market_use_cases.get_asset_info(symbol)
         
         if asset:
             return asset.model_dump(mode="json")
@@ -348,56 +341,6 @@ async def get_asset_info(
             detail=f"Failed to get asset info: {str(e)}"
         )
 
-
-@router.post(
-    "/asset/search",
-    summary="搜索资产",
-    description="根据关键词搜索资产（股票、ETF、加密货币等）",
-)
-async def search_assets(
-    request: SearchAssetsRequest
-) -> Dict[str, Any]:
-    """搜索资产"""
-    try:
-        logger.info(
-            "API: search_assets called",
-            query=request.query,
-            limit=request.limit
-        )
-        
-        from src.server.domain.types import AssetSearchQuery, AssetType
-        
-        manager = Container.adapter_manager()
-        
-        types = []
-        if request.asset_types:
-            for t in request.asset_types:
-                try:
-                    types.append(AssetType(t.lower()))
-                except ValueError:
-                    pass
-        
-        search_query = AssetSearchQuery(
-            query=request.query,
-            asset_types=types if types else None,
-            limit=request.limit
-        )
-        
-        results = await manager.search_assets(search_query)
-        
-        # Wrap list in a dict to match Java client expectation
-        return {
-            "results": [r.model_dump(mode="json") for r in results],
-            "count": len(results),
-            "query": request.query
-        }
-        
-    except Exception as e:
-        logger.error(f"API error in search_assets: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to search assets: {str(e)}"
-        )
 
 
 @router.post(
@@ -416,8 +359,7 @@ async def generate_trading_signal(
             period=request.period
         )
         
-        service = Container.technical_service()
-        result = await service.generate_trading_signal(
+        result = await technical_use_cases.generate_trading_signal(
             symbol=request.symbol,
             period=request.period,
             interval=request.interval
@@ -449,8 +391,7 @@ async def calculate_support_resistance(
             period=request.period
         )
         
-        service = Container.technical_service()
-        result = await service.calculate_support_resistance(
+        result = await technical_use_cases.calculate_support_resistance(
             symbol=request.symbol,
             period=request.period
         )
@@ -478,18 +419,16 @@ async def get_market_report(
         logger.info("API: get_market_report called", symbol=symbol)
         
         import asyncio
-        manager = Container.adapter_manager()
-        
         # 并行获取信息和价格
         info, price = await asyncio.gather(
-            manager.get_asset_info(symbol),
-            manager.get_real_time_price(symbol)
+            market_use_cases.get_asset_info(symbol),
+            market_use_cases.get_real_time_price(symbol),
         )
         
         return {
             "symbol": symbol,
-            "info": info.model_dump(mode="json") if info else None,
-            "price": price.to_dict() if price else None,
+            "info": info,
+            "price": price,
             "timestamp": datetime.now().isoformat(),
         }
         
@@ -515,4 +454,3 @@ def _parse_period_to_days(period: str) -> int:
         return int(period[:-1]) * 365
     else:
         return 30  # 默认 30 天
-

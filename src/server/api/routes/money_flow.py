@@ -7,7 +7,7 @@ Provides RESTful HTTP endpoints for money flow and capital flow data.
 from fastapi import APIRouter, HTTPException, status, Query
 from typing import Dict, Any, List, Optional
 from src.server.utils.logger import logger
-from src.server.core.dependencies import Container
+from src.server.core.use_cases import money_flow as money_flow_use_cases
 
 router = APIRouter(prefix="/api/v1/money-flow", tags=["Money Flow Analysis"])
 
@@ -70,8 +70,7 @@ async def get_stock_money_flow(
             days=days,
         )
 
-        service = Container.money_flow_service()
-        result = await service.get_money_flow(ticker, days)
+        result = await money_flow_use_cases.get_money_flow(ticker, days)
 
         return {"code": 0, "message": "success", "data": result}
 
@@ -107,8 +106,7 @@ async def get_north_bound_flow(
     try:
         logger.info("API: get_north_bound_flow called", days=days)
 
-        service = Container.money_flow_service()
-        result = await service.get_north_bound_flow(days)
+        result = await money_flow_use_cases.get_north_bound_flow(days)
 
         return {"code": 0, "message": "success", "data": result}
 
@@ -151,9 +149,7 @@ async def get_chip_distribution(
             days=days,
         )
 
-        # 直接调用 adapter_manager
-        adapter_manager = Container.adapter_manager()
-        result = await adapter_manager.get_chip_distribution(ticker, days)
+        result = await money_flow_use_cases.get_chip_distribution(ticker, days)
 
         return {"code": 0, "message": "success", "data": result}
 
@@ -164,46 +160,3 @@ async def get_chip_distribution(
             detail=f"Failed to get chip distribution: {str(e)}",
         )
 
-
-@router.get(
-    "/macro-indicators",
-    summary="获取宏观经济指标",
-    description="""
-    获取影响股市的宏观经济数据
-    
-    **支持的指标:**
-    - CPI: 消费者价格指数
-    - PPI: 生产者价格指数
-    - M2: 货币供应量
-    - GDP: 国内生产总值
-    
-    **返回数据:**
-    - 各指标的历史数据
-    - 同比增长率
-    - 最新值
-    """,
-)
-async def get_macro_indicators(
-    indicators: Optional[str] = Query(
-        None, description="指标列表，逗号分隔，如: CPI,PPI,M2。不提供则返回所有"
-    )
-) -> Dict[str, Any]:
-    """获取宏观经济指标"""
-    try:
-        indicator_list = None
-        if indicators:
-            indicator_list = [i.strip().upper() for i in indicators.split(",")]
-
-        logger.info("API: get_macro_indicators called", indicators=indicator_list)
-
-        adapter_manager = Container.adapter_manager()
-        result = await adapter_manager.get_macro_data(indicator_list)
-
-        return {"code": 0, "message": "success", "data": result}
-
-    except Exception as e:
-        logger.error(f"API error in get_macro_indicators: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get macro indicators: {str(e)}",
-        )

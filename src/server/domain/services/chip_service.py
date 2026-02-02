@@ -166,6 +166,16 @@ class ChipService:
             main_peak_idx = np.argmax(chip_percent)
             main_peak_price = float(price_centers[main_peak_idx])
 
+            # 支撑/压力位：按价格排序的累计占比 15% / 85%
+            cum = np.cumsum(chip_percent)
+            support_price = float(price_centers[np.searchsorted(cum, 0.15, side="left")])
+            resistance_price = float(price_centers[np.searchsorted(cum, 0.85, side="left")])
+
+            # 平盘占比：靠近现价 +/-1% 的筹码
+            band = current_price * 0.01
+            flat_mask = (price_centers >= current_price - band) & (price_centers <= current_price + band)
+            flat_ratio = float(chip_percent[flat_mask].sum())
+
             # 90% 筹码集中度
             sorted_indices = np.argsort(chip_percent)[::-1]
             cumsum = 0
@@ -181,10 +191,27 @@ class ChipService:
                 else 0
             )
 
+            trade_ts = df["timestamp"].iloc[-1]
+            trade_date = trade_ts.strftime("%Y%m%d") if hasattr(trade_ts, "strftime") else None
+            distribution = [
+                {"price": round(p, 2), "percentage": round(float(v), 4)}
+                for p, v in zip(price_centers.tolist(), chip_percent.tolist())
+            ]
+
             result = {
                 "symbol": symbol,
                 "component_type": "chip_distribution",
                 "current_price": round(current_price, 2),
+                "trade_date": trade_date,
+                "chip_trade_date": trade_date,
+                "price_trade_date": trade_date,
+                "avg_cost": round(avg_cost, 2),
+                "support_price": round(support_price, 2),
+                "resistance_price": round(resistance_price, 2),
+                "profit_ratio": round(profit_ratio, 4),
+                "loss_ratio": round(1 - profit_ratio, 4),
+                "flat_ratio": round(flat_ratio, 4),
+                "distribution": distribution,
                 "data": {
                     "price_levels": [round(p, 2) for p in price_centers.tolist()],
                     "chip_percent": [round(p, 4) for p in chip_percent.tolist()],

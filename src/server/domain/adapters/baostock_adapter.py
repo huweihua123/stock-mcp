@@ -24,8 +24,6 @@ from src.server.domain.types import (
     AdapterCapability,
     Asset,
     AssetPrice,
-    AssetSearchQuery,
-    AssetSearchResult,
     AssetType,
     DataSource,
     Exchange,
@@ -388,46 +386,6 @@ class BaostockAdapter(BaseDataAdapter):
         except Exception as e:
             self.logger.error(f"Failed to fetch history for {ticker}: {e}")
             return []
-
-    async def search_assets(self, query: AssetSearchQuery) -> List[AssetSearchResult]:
-        """Search for assets.
-        
-        Uses Baostock's query_all_stock to search for stocks.
-        
-        Args:
-            query: Search query parameters
-            
-        Returns:
-            List of search results
-        """
-        # Get all stocks (cached)
-        all_stocks = await self._get_all_stocks_cached()
-
-        q = query.query.upper()
-        results = []
-
-        for stock in all_stocks:
-            code = stock["code"]
-            name = stock["name"]
-            ticker = stock["ticker"]
-
-            # Match code or name
-            if q in code or q in name or q in ticker:
-                results.append(
-                    AssetSearchResult(
-                        ticker=ticker,
-                        asset_type=AssetType.STOCK,
-                        name=name,
-                        exchange=ticker.split(":")[0],
-                        country="CN",
-                        currency="CNY",
-                        relevance_score=1.0 if q == code or q == name else 0.5,
-                    )
-                )
-                if len(results) >= query.limit:
-                    break
-
-        return results
 
     async def _get_all_stocks_cached(self) -> List[Dict]:
         """Helper to get all stocks with caching."""

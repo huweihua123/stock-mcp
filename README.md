@@ -211,17 +211,26 @@ curl -X POST "http://localhost:9898/?_tool=get_real_time_price" \
 
 ### 🧰 可用工具一览
 
+> 实际启用的工具以 MCP 注册表为准（`src/server/mcp/registry.py`）。
+
 | 工具名称                         | 描述                                   | 示例参数                                                                         |
 | -------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------- |
-| `search_assets`                  | 通过名称或代码搜索股票、加密货币或 ETF | `{"query": "茅台"}`                                                              |
+| `search_assets`                  | 通过名称或代码搜索股票、加密货币或 ETF | `{"query": "茅台", "limit": 5}`                                                  |
 | `get_asset_info`                 | 获取资产的详细信息（公司简介、行业等） | `{"ticker": "SSE:600519"}`                                                       |
 | `get_real_time_price`            | 获取任何资产的当前实时价格             | `{"ticker": "SSE:600519"}`                                                       |
+| `get_multiple_prices`            | 批量获取多个资产实时价格               | `{"tickers": ["SSE:600519","NASDAQ:AAPL"]}`                                      |
 | `get_historical_prices`          | 获取指定日期范围的 OHLCV 数据          | `{"ticker": "SSE:600519", "start_date": "2024-01-01", "end_date": "2024-12-31"}` |
-| `calculate_technical_indicators` | 计算技术指标 (RSI, MACD 等)            | `{"ticker": "SSE:600519", "indicators": ["rsi", "macd"]}`                        |
-| `generate_trading_signal`        | 基于技术指标生成交易信号               | `{"ticker": "SSE:600519"}`                                                       |
-| `get_financials`                 | 检索详细的财务报表和比率               | `{"ticker": "SSE:600519"}`                                                       |
-| `perform_deep_research`          | **(Agent 首选)** 一次调用聚合所有数据  | `{"ticker": "SSE:600519"}`                                                       |
-| `get_latest_news`                | 获取指定标的的相关市场新闻             | `{"ticker": "SSE:600519"}`                                                       |
+| `calculate_technical_indicators` | 计算技术指标 (RSI, MACD 等)            | `{"symbol": "SSE:600519", "period": "90d", "interval": "1d"}`                    |
+| `analyze_price_patterns`         | 分析价格形态                           | `{"symbol": "SSE:600519", "period": "90d"}`                                      |
+| `calculate_support_resistance`   | 计算支撑/阻力位                        | `{"symbol": "SSE:600519", "period": "90d"}`                                      |
+| `analyze_volume_profile`         | 分析成交量分布                         | `{"symbol": "SSE:600519", "period": "90d"}`                                      |
+| `get_financial_reports`          | 财务图表（营收/净利润）                | `{"symbol": "SSE:600519"}`                                                       |
+| `get_mainbz_info`                | 主营业务构成                           | `{"symbol": "SSE:600519"}`                                                       |
+| `get_shareholder_info`           | 股东信息                               | `{"symbol": "SSE:600519"}`                                                       |
+| `get_dividend_info`              | 分红送股历史                           | `{"symbol": "SSE:600519"}`                                                       |
+| `get_money_flow`                 | 个股资金流向                           | `{"symbol": "SSE:600519", "days": 20}`                                           |
+| `get_north_bound_flow`           | 北向资金流向                           | `{"days": 30}`                                                                   |
+| `get_macro_data`                 | 宏观数据（CPI/PPI/M2/GDP）             | `{"indicators": "CPI,PPI,M2,GDP"}`                                               |
 
 > **💡 重要提示**: 
 > - A股股票代码格式：`SSE:600519`（上交所）、`SZSE:000001`（深交所）
@@ -252,14 +261,14 @@ curl -X POST "http://localhost:9898/?_tool=get_real_time_price" \
 
 #### 1. HTTP 接口测试
 
-使用 `scripts/test_mcp_http.py` 测试 MCP 服务器的 HTTP 接口：
+使用 `scripts/test_mcp_refactor.py` 做快速自检（MCP + REST）：
 
 ```bash
 # 1. 启动 MCP 服务器（在一个终端）
 python -m uvicorn src.server.app:app --host 0.0.0.0 --port 9898
 
 # 2. 在另一个终端运行测试脚本
-python scripts/test_mcp_http.py
+NO_PROXY=localhost,127.0.0.1 python scripts/test_mcp_refactor.py
 ```
 
 该脚本会：
@@ -295,10 +304,12 @@ python scripts/mcp2openapi.py
 
 ```
 src/server/
-├── app.py                 # FastMCP 应用入口
+├── app.py                 # FastAPI + MCP 入口
 ├── config/                # 配置管理
 ├── core/                  # 核心业务逻辑
-│   └── dependencies.py    # 依赖注入容器
+│   ├── bootstrap.py        # 启动初始化（连接/适配器注册）
+│   ├── dependencies.py     # 依赖注入容器
+│   └── use_cases/          # 统一业务用例（MCP/REST 共享）
 ├── domain/                # 领域层
 │   ├── adapters/          # 数据适配器（Yahoo, Akshare, Tushare 等）
 │   ├── models/            # 领域模型
@@ -307,6 +318,7 @@ src/server/
 │   ├── cache/             # 缓存（Redis）
 │   └── external/          # 外部 API 客户端
 ├── mcp/                   # MCP 协议层
+│   ├── registry.py        # MCP 工具注册表（单一来源）
 │   └── tools/             # MCP 工具定义
 └── utils/                 # 工具类
 ```
@@ -521,17 +533,26 @@ curl -X POST "http://localhost:9898/?_tool=get_real_time_price" \
 
 ### 🧰 Available Tools
 
+> The actual enabled tools are defined in the MCP registry (`src/server/mcp/registry.py`).
+
 | Tool Name                        | Description                                                      | Example Parameters                                                               |
 | -------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `search_assets`                  | Search for stocks, crypto, or ETFs by name or ticker             | `{"query": "Moutai"}`                                                            |
+| `search_assets`                  | Search for stocks, crypto, or ETFs by name or ticker             | `{"query": "Moutai", "limit": 5}`                                               |
 | `get_asset_info`                 | Get detailed asset information (company profile, industry, etc.) | `{"ticker": "SSE:600519"}`                                                       |
 | `get_real_time_price`            | Get the current live price for any asset                         | `{"ticker": "SSE:600519"}`                                                       |
+| `get_multiple_prices`            | Batch fetch real-time prices                                     | `{"tickers": ["SSE:600519","NASDAQ:AAPL"]}`                                     |
 | `get_historical_prices`          | Fetch OHLCV data for a specific date range                       | `{"ticker": "SSE:600519", "start_date": "2024-01-01", "end_date": "2024-12-31"}` |
-| `calculate_technical_indicators` | Compute technical indicators (RSI, MACD, etc.)                   | `{"ticker": "SSE:600519", "indicators": ["rsi", "macd"]}`                        |
-| `generate_trading_signal`        | Generate trading signals based on technical indicators           | `{"ticker": "SSE:600519"}`                                                       |
-| `get_financials`                 | Retrieve detailed financial statements and ratios                | `{"ticker": "SSE:600519"}`                                                       |
-| `perform_deep_research`          | **(Agent Favorite)** Aggregate all data in one call              | `{"ticker": "SSE:600519"}`                                                       |
-| `get_latest_news`                | Fetch relevant market news for a specific symbol                 | `{"ticker": "SSE:600519"}`                                                       |
+| `calculate_technical_indicators` | Compute technical indicators (RSI, MACD, etc.)                   | `{"symbol": "SSE:600519", "period": "90d", "interval": "1d"}`                    |
+| `analyze_price_patterns`         | Analyze price patterns                                           | `{"symbol": "SSE:600519", "period": "90d"}`                                      |
+| `calculate_support_resistance`   | Calculate support/resistance levels                              | `{"symbol": "SSE:600519", "period": "90d"}`                                      |
+| `analyze_volume_profile`         | Analyze volume profile                                           | `{"symbol": "SSE:600519", "period": "90d"}`                                      |
+| `get_financial_reports`          | Revenue & net income charts                                      | `{"symbol": "SSE:600519"}`                                                       |
+| `get_mainbz_info`                | Main business composition                                        | `{"symbol": "SSE:600519"}`                                                       |
+| `get_shareholder_info`           | Shareholder information                                          | `{"symbol": "SSE:600519"}`                                                       |
+| `get_dividend_info`              | Dividend history                                                 | `{"symbol": "SSE:600519"}`                                                       |
+| `get_money_flow`                 | Money flow for a stock                                           | `{"symbol": "SSE:600519", "days": 20}`                                           |
+| `get_north_bound_flow`           | Northbound capital flow                                          | `{"days": 30}`                                                                   |
+| `get_macro_data`                 | Macro indicators (CPI/PPI/M2/GDP)                                | `{"indicators": "CPI,PPI,M2,GDP"}`                                               |
 
 > **💡 Important Note**: 
 > - A-share ticker format: `SSE:600519` (Shanghai), `SZSE:000001` (Shenzhen)
@@ -562,14 +583,14 @@ The project provides comprehensive test scripts to help you quickly verify funct
 
 #### 1. HTTP Interface Testing
 
-Use `scripts/test_mcp_http.py` to test the MCP server's HTTP interface:
+Use `scripts/test_mcp_refactor.py` for quick MCP + REST sanity checks:
 
 ```bash
 # 1. Start the MCP server (in one terminal)
 python -m uvicorn src.server.app:app --host 0.0.0.0 --port 9898
 
 # 2. Run the test script in another terminal
-python scripts/test_mcp_http.py
+NO_PROXY=localhost,127.0.0.1 python scripts/test_mcp_refactor.py
 ```
 
 This script will:
@@ -605,10 +626,12 @@ This project adopts **Domain-Driven Design (DDD)** architecture with clear separ
 
 ```
 src/server/
-├── app.py                 # FastMCP application entry
+├── app.py                 # FastAPI + MCP entry
 ├── config/                # Configuration management
 ├── core/                  # Core business logic
-│   └── dependencies.py    # Dependency injection container
+│   ├── bootstrap.py        # Bootstrap (connections/adapters)
+│   ├── dependencies.py     # Dependency injection container
+│   └── use_cases/          # Shared use cases (MCP/REST)
 ├── domain/                # Domain layer
 │   ├── adapters/          # Data adapters (Yahoo, Akshare, Tushare, etc.)
 │   ├── models/            # Domain models
@@ -617,6 +640,7 @@ src/server/
 │   ├── cache/             # Caching (Redis)
 │   └── external/          # External API clients
 ├── mcp/                   # MCP protocol layer
+│   ├── registry.py        # MCP tool registry (single source of truth)
 │   └── tools/             # MCP tool definitions
 └── utils/                 # Utilities
 ```

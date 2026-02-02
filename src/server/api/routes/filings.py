@@ -2,8 +2,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from src.server.core.dependencies import Container
-from src.server.domain.services.filings_service import FilingsService
+from src.server.core.use_cases import filings as filings_use_cases
 
 
 router = APIRouter(prefix="/filings", tags=["filings"])
@@ -27,9 +26,8 @@ async def get_periodic_sec_filings(
     limit: int = Query(10, description="Max results when year is omitted"),
 ):
     """Fetch SEC periodic filings (10-K/10-Q)."""
-    service: FilingsService = Container.filings_service()
     try:
-        return await service.fetch_periodic_sec_filings(
+        return await filings_use_cases.fetch_periodic_sec_filings(
             ticker=ticker,
             forms=forms,
             year=year,
@@ -48,9 +46,8 @@ async def get_event_sec_filings(
     limit: int = Query(10, description="Max results"),
 ):
     """Fetch SEC event-driven filings (8-K, etc.)."""
-    service: FilingsService = Container.filings_service()
     try:
-        return await service.fetch_event_sec_filings(
+        return await filings_use_cases.fetch_event_sec_filings(
             ticker=ticker,
             forms=forms,
             start_date=start_date,
@@ -69,9 +66,8 @@ async def get_ashare_filings(
     limit: int = Query(10, description="Max results"),
 ):
     """Fetch A-share announcements."""
-    service: FilingsService = Container.filings_service()
     try:
-        return await service.fetch_ashare_filings(
+        return await filings_use_cases.fetch_ashare_filings(
             symbol=symbol,
             filing_types=filing_types,
             start_date=start_date,
@@ -84,9 +80,8 @@ async def get_ashare_filings(
 @router.post("/process")
 async def process_document(request: ProcessDocumentRequest):
     """Process a document (download, clean, upload to MinIO)."""
-    service: FilingsService = Container.filings_service()
     try:
-        result = await service.process_document(
+        result = await filings_use_cases.process_document(
             doc_id=request.doc_id,
             url=request.url,
             doc_type=request.doc_type,
@@ -119,9 +114,10 @@ async def get_filing_markdown(
     """
     from fastapi.responses import PlainTextResponse
     
-    service: FilingsService = Container.filings_service()
     try:
-        result = await service.get_filing_markdown(ticker=ticker, doc_id=doc_id)
+        result = await filings_use_cases.get_filing_markdown(
+            ticker=ticker, doc_id=doc_id
+        )
         
         if result.get("status") == "error":
             raise HTTPException(

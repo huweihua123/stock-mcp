@@ -5,7 +5,7 @@ Provides ChunkedDocument-based chunking with item labels for SEC filings.
 
 from typing import Any, Dict, List, Optional
 
-from fastmcp import FastMCP
+from fastmcp import FastMCP, Context
 
 from src.server.utils.logger import logger
 
@@ -43,11 +43,12 @@ def _chunk_to_text(chunk_obj) -> str:
 def register_chunking_tools(mcp: FastMCP):
     """Register document chunking tools."""
 
-    @mcp.tool(tags={"chunking", "rag-core"})
+    @mcp.tool(tags={"chunking"})
     async def get_document_chunks(
         ticker: str,
         doc_id: str,
         items: list[str] = None,
+        ctx: Context = None
     ) -> Dict[str, Any]:
         """Get semantic chunks from SEC filing with item labels.
         
@@ -72,6 +73,7 @@ def register_chunking_tools(mcp: FastMCP):
                    - Item 7A: Quantitative Disclosures
                    - Item 8: Financial Statements ⭐
                    - Item 9A: Controls and Procedures
+            ctx: FastMCP Context for logging
         
         Returns:
             Dict with:
@@ -103,6 +105,11 @@ def register_chunking_tools(mcp: FastMCP):
                 ]
             }
         """
+        if ctx:
+            await ctx.info(
+                f"🔧 获取文档分块: {ticker} {doc_id}",
+                extra={"ticker": ticker, "doc_id": doc_id, "items": items}
+            )
         try:
             from src.server.utils.sec_utils import get_company
             
@@ -141,12 +148,12 @@ def register_chunking_tools(mcp: FastMCP):
                 if not hasattr(filing_obj, 'doc') or filing_obj.doc is None:
                     # Fallback: some filings may not support ChunkedDocument
                     logger.warning(f"ChunkedDocument not available for {accession_number}, using markdown fallback")
-                    return await _fallback_markdown_chunking(target_filing, pure_symbol, accession_number)
+                    return await _fallback_markdown_chunking(target_filing, pure_symbol, accession_number, ctx)
                 
                 chunked_doc = filing_obj.doc
             except Exception as e:
                 logger.warning(f"Failed to get ChunkedDocument: {e}, using markdown fallback")
-                return await _fallback_markdown_chunking(target_filing, pure_symbol, accession_number)
+                return await _fallback_markdown_chunking(target_filing, pure_symbol, accession_number, ctx)
             
             # 3. Define items to extract
             default_items = ["Item 1", "Item 1A", "Item 7", "Item 7A", "Item 8"]
@@ -230,6 +237,12 @@ def register_chunking_tools(mcp: FastMCP):
             
             logger.info(f"✅ Total chunks extracted: {len(all_chunks)}")
             
+            if ctx:
+                await ctx.info(
+                    f"✅ 文档分块完成: {len(all_chunks)}个分块",
+                    extra={"count": len(all_chunks)}
+                )
+
             return {
                 "status": "success",
                 "doc_id": accession_number,
@@ -244,6 +257,11 @@ def register_chunking_tools(mcp: FastMCP):
             logger.error(f"get_document_chunks failed: {e}")
             import traceback
             logger.error(traceback.format_exc())
+            if ctx:
+                await ctx.error(
+                    f"❌ 文档分块失败: {ticker}",
+                    extra={"error": str(e)}
+                )
             return {
                 "status": "error",
                 "error": str(e),
@@ -252,7 +270,7 @@ def register_chunking_tools(mcp: FastMCP):
             }
 
 
-async def _fallback_markdown_chunking(filing, ticker: str, doc_id: str) -> Dict[str, Any]:
+async def _fallback_markdown_chunking(filing, ticker: str, doc_id: str, ctx: Context = None) -> Dict[str, Any]:
     """Fallback chunking using markdown when ChunkedDocument is not available."""
     try:
         markdown_content = filing.markdown()

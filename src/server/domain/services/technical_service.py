@@ -143,21 +143,27 @@ class TechnicalService:
         return true_range.rolling(window=period).mean()
 
     async def calculate_indicators(
-        self, symbol: str, period: str = "90d", interval: str = "1d"
+        self, symbol: str, period: str = "90d", interval: str = "1d", limit: int | None = None
     ) -> Dict[str, Any]:
         """Calculate technical indicators and return structured data (Time Series)."""
         try:
             # Parse requested period to start/end dates
             days = 90
-            if period.endswith("d"):
-                days = int(period[:-1])
-            elif period.endswith("m"):
-                days = int(period[:-1]) * 30
-            elif period.endswith("y"):
-                days = int(period[:-1]) * 365
+            if limit is None:
+                if period.endswith("d"):
+                    days = int(period[:-1])
+                elif period.endswith("m"):
+                    days = int(period[:-1]) * 30
+                elif period.endswith("y"):
+                    days = int(period[:-1]) * 365
+            else:
+                # limit is in trading days; use it to size the display window
+                days = max(1, int(limit))
 
             end_date = datetime.now()
-            start_date = end_date - timedelta(days=days)
+            # Warm-up window: ensure indicators (e.g., MA60/MACD) are stable
+            warmup_days = max(120, days)
+            start_date = end_date - timedelta(days=days + warmup_days)
 
             # Delegate to AdapterManager
             # The adapter will handle data fetching and calculation (returning time series)
@@ -168,6 +174,59 @@ class TechnicalService:
                 start_date=start_date,
                 end_date=end_date,
             )
+
+            # Trim to requested window (keep last `days` calendar days)
+            if "error" not in result:
+                if limit is not None:
+                    # Trim to last N trading days
+                    start_idx = max(0, len(result.get("dates", [])) - days)
+                else:
+                    dates = result.get("dates", [])
+                    if dates:
+                        cutoff = (end_date - timedelta(days=days)).date()
+                        start_idx = 0
+                        for i, d in enumerate(dates):
+                            try:
+                                if datetime.strptime(d, "%Y-%m-%d").date() >= cutoff:
+                                    start_idx = i
+                                    break
+                            except Exception:
+                                start_idx = 0
+                                break
+                    else:
+                        start_idx = 0
+
+                if start_idx > 0:
+                    # Slice base series
+                    result["dates"] = result.get("dates", [])[start_idx:]
+                    result["close"] = result.get("close", [])[start_idx:]
+
+                    # Slice indicator series
+                    indicators = result.get("indicators", {})
+                    ma = indicators.get("ma", {})
+                    for k, v in list(ma.items()):
+                        if isinstance(v, list):
+                            ma[k] = v[start_idx:]
+                    macd = indicators.get("macd", {})
+                    for k, v in list(macd.items()):
+                        if isinstance(v, list):
+                            macd[k] = v[start_idx:]
+                    kdj = indicators.get("kdj", {})
+                    for k, v in list(kdj.items()):
+                        if isinstance(v, list):
+                            kdj[k] = v[start_idx:]
+                    rsi = indicators.get("rsi")
+                    if isinstance(rsi, list):
+                        indicators["rsi"] = rsi[start_idx:]
+                    vol = indicators.get("vol", {})
+                    for k, v in list(vol.items()):
+                        if isinstance(v, list):
+                            vol[k] = v[start_idx:]
+
+                    # Slice rows if present
+                    rows = result.get("rows")
+                    if isinstance(rows, list):
+                        result["rows"] = rows[start_idx:]
 
             # ⭐ 添加 component_type 以支持前端自动识别为可视化 Artifact
             if "error" not in result:

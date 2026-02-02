@@ -248,38 +248,6 @@ class AssetPrice:
         )
 
 
-class AssetSearchResult(BaseModel):
-    """Search result for asset lookup."""
-
-    ticker: str = Field(..., description="Standardized ticker")
-    asset_type: AssetType = Field(..., description="Asset type")
-    name: str = Field(..., description="Asset name")
-    exchange: str = Field(..., description="Exchange name")
-    country: str = Field(..., description="Country code")
-
-    # Optional fields
-    currency: Optional[str] = Field(default=None, description="Currency code")
-    market_status: Optional[MarketStatus] = Field(
-        default=None, description="Market status"
-    )
-    relevance_score: float = Field(
-        default=0.5, description="Search relevance score (0-1)"
-    )
-
-
-class AssetSearchQuery(BaseModel):
-    """Asset search query parameters."""
-
-    query: str = Field(..., description="Search query string")
-    limit: int = Field(default=10, description="Maximum number of results")
-
-    @field_validator("limit")
-    @classmethod
-    def validate_limit(cls, v):
-        if v <= 0 or v > 1000:
-            raise ValueError("Limit must be between 1 and 1000")
-        return v
-
 
 # Fallback search provider type (for LLM-based search)
 class FallbackSearchProvider(BaseModel):

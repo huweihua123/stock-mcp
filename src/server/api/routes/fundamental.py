@@ -7,7 +7,7 @@ Provides RESTful HTTP endpoints for fundamental/financial data.
 from fastapi import APIRouter, HTTPException, status, Query
 from typing import Dict, Any
 from src.server.utils.logger import logger
-from src.server.core.dependencies import Container
+from src.server.core.use_cases import fundamental as fundamental_use_cases
 
 router = APIRouter(prefix="/api/v1/fundamental", tags=["Fundamental Analysis"])
 
@@ -65,8 +65,7 @@ async def get_financial_report(
             normalized_ticker=ticker
         )
         
-        service = Container.fundamental_service()
-        result = await service.get_fundamental_analysis(ticker)
+        result = await fundamental_use_cases.get_fundamental_analysis(ticker)
         
         return result
         
@@ -92,10 +91,8 @@ async def get_financial_ratios(
         
         logger.info("API: get_financial_ratios called", symbol=symbol)
         
-        service = Container.fundamental_service()
-        
         # 获取完整分析并提取比率部分
-        result = await service.get_fundamental_analysis(ticker)
+        result = await fundamental_use_cases.get_fundamental_analysis(ticker)
         
         # 如果有比率数据，返回它；否则返回整体结果
         if "ratios" in result:

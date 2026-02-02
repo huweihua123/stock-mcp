@@ -24,6 +24,12 @@ class FilingsService:
         
         # No need to call set_identity here, sec_utils handles it on import
 
+    def _extract_symbol(self, ticker: str) -> str:
+        """Extract pure symbol from ticker (e.g. 'NASDAQ:AAPL' -> 'AAPL')."""
+        if ":" in ticker:
+            return ticker.split(":", 1)[1]
+        return ticker
+
     async def fetch_periodic_sec_filings(
         self,
         ticker: str,
