@@ -194,13 +194,13 @@ curl -X POST http://localhost:9898 \
   }'
 
 # 调用工具示例：查询贵州茅台价格
-curl -X POST "http://localhost:9898/?_tool=get_real_time_price" \
+curl -X POST "http://localhost:9898/?_tool=get_kline_data" \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0",
     "method": "tools/call",
     "params": {
-      "name": "get_real_time_price",
+      "name": "get_kline_data",
       "arguments": {
         "ticker": "SSE:600519"
       }
@@ -216,14 +216,8 @@ curl -X POST "http://localhost:9898/?_tool=get_real_time_price" \
 | 工具名称                         | 描述                                   | 示例参数                                                                         |
 | -------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------- |
 | `search_assets`                  | 通过名称或代码搜索股票、加密货币或 ETF | `{"query": "茅台", "limit": 5}`                                                  |
-| `get_asset_info`                 | 获取资产的详细信息（公司简介、行业等） | `{"ticker": "SSE:600519"}`                                                       |
-| `get_real_time_price`            | 获取任何资产的当前实时价格             | `{"ticker": "SSE:600519"}`                                                       |
-| `get_multiple_prices`            | 批量获取多个资产实时价格               | `{"tickers": ["SSE:600519","NASDAQ:AAPL"]}`                                      |
-| `get_historical_prices`          | 获取指定日期范围的 OHLCV 数据          | `{"ticker": "SSE:600519", "start_date": "2024-01-01", "end_date": "2024-12-31"}` |
-| `calculate_technical_indicators` | 计算技术指标 (RSI, MACD 等)            | `{"symbol": "SSE:600519", "period": "90d", "interval": "1d"}`                    |
-| `analyze_price_patterns`         | 分析价格形态                           | `{"symbol": "SSE:600519", "period": "90d"}`                                      |
-| `calculate_support_resistance`   | 计算支撑/阻力位                        | `{"symbol": "SSE:600519", "period": "90d"}`                                      |
-| `analyze_volume_profile`         | 分析成交量分布                         | `{"symbol": "SSE:600519", "period": "90d"}`                                      |
+| `get_kline_data`          | 获取指定日期范围的 OHLCV 数据          | `{"ticker": "SSE:600519", "start_date": "2024-01-01", "end_date": "2024-12-31"}` |
+| `get_technical_indicators` | 计算技术指标 (RSI, MACD 等)            | `{"symbol": "SSE:600519", "period": "90d", "interval": "1d"}`                    |
 | `get_financial_reports`          | 财务图表（营收/净利润）                | `{"symbol": "SSE:600519"}`                                                       |
 | `get_mainbz_info`                | 主营业务构成                           | `{"symbol": "SSE:600519"}`                                                       |
 | `get_shareholder_info`           | 股东信息                               | `{"symbol": "SSE:600519"}`                                                       |
@@ -516,13 +510,13 @@ curl -X POST http://localhost:9898 \
   }'
 
 # Call tool example: Query Moutai stock price
-curl -X POST "http://localhost:9898/?_tool=get_real_time_price" \
+curl -X POST "http://localhost:9898/?_tool=get_kline_data" \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0",
     "method": "tools/call",
     "params": {
-      "name": "get_real_time_price",
+      "name": "get_kline_data",
       "arguments": {
         "ticker": "SSE:600519"
       }
@@ -538,14 +532,8 @@ curl -X POST "http://localhost:9898/?_tool=get_real_time_price" \
 | Tool Name                        | Description                                                      | Example Parameters                                                               |
 | -------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | `search_assets`                  | Search for stocks, crypto, or ETFs by name or ticker             | `{"query": "Moutai", "limit": 5}`                                               |
-| `get_asset_info`                 | Get detailed asset information (company profile, industry, etc.) | `{"ticker": "SSE:600519"}`                                                       |
-| `get_real_time_price`            | Get the current live price for any asset                         | `{"ticker": "SSE:600519"}`                                                       |
-| `get_multiple_prices`            | Batch fetch real-time prices                                     | `{"tickers": ["SSE:600519","NASDAQ:AAPL"]}`                                     |
-| `get_historical_prices`          | Fetch OHLCV data for a specific date range                       | `{"ticker": "SSE:600519", "start_date": "2024-01-01", "end_date": "2024-12-31"}` |
-| `calculate_technical_indicators` | Compute technical indicators (RSI, MACD, etc.)                   | `{"symbol": "SSE:600519", "period": "90d", "interval": "1d"}`                    |
-| `analyze_price_patterns`         | Analyze price patterns                                           | `{"symbol": "SSE:600519", "period": "90d"}`                                      |
-| `calculate_support_resistance`   | Calculate support/resistance levels                              | `{"symbol": "SSE:600519", "period": "90d"}`                                      |
-| `analyze_volume_profile`         | Analyze volume profile                                           | `{"symbol": "SSE:600519", "period": "90d"}`                                      |
+| `get_kline_data`          | Fetch OHLCV data for a specific date range                       | `{"ticker": "SSE:600519", "start_date": "2024-01-01", "end_date": "2024-12-31"}` |
+| `get_technical_indicators` | Compute technical indicators (RSI, MACD, etc.)                   | `{"symbol": "SSE:600519", "period": "90d", "interval": "1d"}`                    |
 | `get_financial_reports`          | Revenue & net income charts                                      | `{"symbol": "SSE:600519"}`                                                       |
 | `get_mainbz_info`                | Main business composition                                        | `{"symbol": "SSE:600519"}`                                                       |
 | `get_shareholder_info`           | Shareholder information                                          | `{"symbol": "SSE:600519"}`                                                       |

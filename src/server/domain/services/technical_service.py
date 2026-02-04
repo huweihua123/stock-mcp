@@ -164,6 +164,17 @@ class TechnicalService:
             # Warm-up window: ensure indicators (e.g., MA60/MACD) are stable
             warmup_days = max(120, days)
             start_date = end_date - timedelta(days=days + warmup_days)
+            logger.info(
+                "TechnicalService.calculate_indicators request",
+                symbol=symbol,
+                period=period,
+                interval=interval,
+                limit=limit,
+                days=days,
+                warmup_days=warmup_days,
+                start_date=start_date.strftime("%Y-%m-%d"),
+                end_date=end_date.strftime("%Y-%m-%d"),
+            )
 
             # Delegate to AdapterManager
             # The adapter will handle data fetching and calculation (returning time series)
@@ -174,6 +185,26 @@ class TechnicalService:
                 start_date=start_date,
                 end_date=end_date,
             )
+
+            if isinstance(result, dict) and result.get("error"):
+                logger.warning(
+                    "TechnicalService.calculate_indicators upstream error",
+                    symbol=symbol,
+                    error=result.get("error"),
+                    source=result.get("source"),
+                )
+            else:
+                rows = result.get("rows") if isinstance(result, dict) else None
+                logger.info(
+                    "TechnicalService.calculate_indicators upstream ok",
+                    symbol=symbol,
+                    source=result.get("source") if isinstance(result, dict) else None,
+                    ts_code=result.get("ts_code") if isinstance(result, dict) else None,
+                    rows_count=len(rows) if isinstance(rows, list) else 0,
+                    dates_count=len(result.get("dates", []))
+                    if isinstance(result, dict) and isinstance(result.get("dates"), list)
+                    else 0,
+                )
 
             # Trim to requested window (keep last `days` calendar days)
             if "error" not in result:

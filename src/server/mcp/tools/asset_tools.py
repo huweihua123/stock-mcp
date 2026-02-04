@@ -3,13 +3,13 @@
 Provides asset search, price queries, and asset information retrieval.
 Returns structured data (JSON).
 
-Active Tools (4):
-  - get_asset_info: 获取资产详细信息
-  - get_real_time_price: 获取单个资产实时价格
-  - get_multiple_prices: 批量获取资产实时价格
-  - get_historical_prices: 获取历史价格数据
+Active Tools (1):
+  - get_kline_data: 获取K线历史价格数据
 
 Disabled Tools:
+  - get_asset_info: 🔇 当前策略仅保留K线原子能力
+  - get_real_time_price: 🔇 由策略层改用 get_kline_data 派生最新价
+  - get_multiple_prices: 🔇 当前策略仅保留K线原子能力
   - get_market_report: 🔇 聚合工具，应由 Agent 层调用原子工具组合
 """
 
@@ -33,7 +33,6 @@ def register_asset_tools(mcp: FastMCP):
     """Register asset-related tools."""
 
 
-    @mcp.tool(tags={"asset"})
     async def get_asset_info(ticker: str, ctx: Context = None) -> Dict[str, Any]:
         """Get detailed asset information.
 
@@ -94,7 +93,6 @@ def register_asset_tools(mcp: FastMCP):
                 )
             return {"error": str(e), "component_type": "asset_info"}
 
-    @mcp.tool(tags={"asset"})
     async def get_real_time_price(ticker: str, ctx: Context = None) -> Dict[str, Any]:
         """Get real-time price for an asset.
 
@@ -159,7 +157,6 @@ def register_asset_tools(mcp: FastMCP):
                 )
             return {"error": str(e), "component_type": "real_time_price"}
 
-    @mcp.tool(tags={"asset"})
     async def get_multiple_prices(tickers: list[str], ctx: Context = None) -> Dict[str, Any]:
         """Get real-time prices for multiple assets.
 
@@ -209,9 +206,9 @@ def register_asset_tools(mcp: FastMCP):
             return {"error": str(e), "component_type": "multiple_prices"}
 
     @mcp.tool(tags={"asset"})
-    async def get_historical_prices(
+    async def get_kline_data(
         ticker: str, start_date: str, end_date: str, interval: str = "1d", ctx: Context = None) -> Dict[str, Any]:
-        """Get historical price data.
+        """Get K-line historical price data.
 
         Args:
             ticker: Asset ticker. Format: EXCHANGE:SYMBOL
@@ -234,7 +231,7 @@ def register_asset_tools(mcp: FastMCP):
 
         try:
             logger.info(
-                "MCP tool called: get_historical_prices",
+                "MCP tool called: get_kline_data",
                 ticker=ticker,
                 start=start_date,
                 end=end_date,

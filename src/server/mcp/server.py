@@ -197,16 +197,10 @@ def get_tools_by_tag(tag: str) -> list[str]:
             "get_ggt_daily",
         ],
         "asset": [
-            "get_asset_info",
-            "get_real_time_price",
-            "get_multiple_prices",
-            "get_historical_prices",
+            "get_kline_data",
         ],
         "technical": [
-            "calculate_technical_indicators",
-            "analyze_price_patterns",
-            "calculate_support_resistance",
-            "analyze_volume_profile",
+            "get_technical_indicators",
         ],
         "filings": [
             "fetch_periodic_sec_filings",

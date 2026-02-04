@@ -56,8 +56,34 @@ def register_fundamental_tools(mcp: FastMCP):
                         return None
                 return None
 
+            def _normalize_end_date(value: Any) -> str | None:
+                if value is None:
+                    return None
+                if not isinstance(value, str):
+                    value = str(value)
+                cleaned = (
+                    value.strip()
+                    .replace("-", "")
+                    .replace("/", "")
+                    .replace(".", "")
+                )
+                return cleaned if len(cleaned) >= 8 and cleaned[:8].isdigit() else None
+
             def _normalize_income_row(row: Dict[str, Any]) -> Dict[str, Any]:
-                end_date = _first_value(row, ["end_date", "报告期", "报表日期", "日期", "截止日期"])
+                end_date = _normalize_end_date(
+                    _first_value(
+                        row,
+                        [
+                            "end_date",
+                            "报告期",
+                            "报告日期",
+                            "报告日",
+                            "报表日期",
+                            "日期",
+                            "截止日期",
+                        ],
+                    )
+                )
                 revenue = _first_value(row, ["revenue", "营业收入", "营业总收入", "主营业务收入"])
                 net_income = _first_value(
                     row,

@@ -95,10 +95,7 @@ class OpenAPIGenerator:
         """生成路径定义 - 每个工具一个独立端点"""
         paths = {}
         tool_groups = {
-            "get_asset_info": "Asset Tools",
-            "get_real_time_price": "Asset Tools",
-            "get_multiple_prices": "Asset Tools",
-            "get_historical_prices": "Asset Tools",
+            "get_kline_data": "Asset Tools",
             "get_stock_price_data": "Market Tools",
             "get_market_report": "Market Tools",
             "get_financial_reports": "Fundamental Tools",
@@ -117,10 +114,8 @@ class OpenAPIGenerator:
             "get_interest_rates": "Market Tools",
             "get_latest_news": "News Tools",
             "perform_deep_research": "Research Tools",
-            "calculate_technical_indicators": "Technical Tools",
+            "get_technical_indicators": "Technical Tools",
             "generate_trading_signal": "Technical Tools",
-            "analyze_price_patterns": "Technical Tools",
-            "detect_support_resistance": "Technical Tools",
             "calculate_volatility": "Technical Tools",
             "fetch_periodic_sec_filings": "Filings Tools",
             "fetch_event_sec_filings": "Filings Tools",

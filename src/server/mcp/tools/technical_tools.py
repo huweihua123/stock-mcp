@@ -3,13 +3,13 @@
 Provides technical indicators calculation and analysis.
 Returns structured data (JSON).
 
-Active Tools (4):
-  - calculate_technical_indicators: 计算技术指标 (RSI, MACD, SMA, EMA, BB, KDJ, ATR)
-  - analyze_price_patterns: 分析价格形态
-  - calculate_support_resistance: 计算支撑/阻力位
-  - analyze_volume_profile: 分析成交量分布
+Active Tools (1):
+  - get_technical_indicators: 获取技术指标 (RSI, MACD, SMA, EMA, BB, KDJ, ATR)
 
 Disabled Tools:
+  - analyze_price_patterns: 🔇 当前策略聚焦核心指标
+  - calculate_support_resistance: 🔇 当前策略聚焦核心指标
+  - analyze_volume_profile: 🔇 当前策略聚焦核心指标
   - generate_trading_signal: 🔇 交易信号应由 LLM 基于技术指标自行判断
 """
 
@@ -75,7 +75,6 @@ def register_technical_tools(mcp: FastMCP):
                 return f"{code}.BJ"
         return symbol.upper()
 
-    @mcp.tool(tags={"technical"})
     async def calculate_technical_indicators(
         symbol: str,
         period: str = "30d",
@@ -121,13 +120,51 @@ def register_technical_tools(mcp: FastMCP):
 
         try:
             symbol = _normalize_ticker(symbol)
+            logger.info(
+                "MCP tool called: calculate_technical_indicators",
+                symbol=symbol,
+                period=period,
+                interval=interval,
+                limit=limit,
+            )
             result = await technical_use_cases.calculate_technical_indicators(
                 symbol, period, interval, limit
             )
+
+            if isinstance(result, dict) and result.get("error"):
+                err = str(result.get("error"))
+                logger.warning(
+                    "calculate_technical_indicators returned error",
+                    symbol=symbol,
+                    period=period,
+                    interval=interval,
+                    limit=limit,
+                    error=err,
+                )
+                if ctx:
+                    await ctx.error(
+                        f"❌ 技术指标计算失败: {symbol}",
+                        extra={
+                            "error": err,
+                            "period": period,
+                            "interval": interval,
+                            "limit": limit,
+                        },
+                    )
+                return {"error": err}
+
             result["component_type"] = "technical_indicators"
 
             # 构建摘要 - 只基于 rows(竞品格式)
             rows = result.get("rows") if isinstance(result.get("rows"), list) else []
+            logger.info(
+                "calculate_technical_indicators result stats",
+                symbol=symbol,
+                ts_code=result.get("ts_code"),
+                rows_count=len(rows),
+                has_dates=isinstance(result.get("dates"), list),
+                dates_count=len(result.get("dates", [])) if isinstance(result.get("dates"), list) else 0,
+            )
             rsi = 0.0
             macd_signal = "中性"
             current_price = 0.0
@@ -271,7 +308,6 @@ def register_technical_tools(mcp: FastMCP):
                 )
             return {"error": str(e)}
 
-    @mcp.tool(tags={"technical"})
     async def analyze_price_patterns(
         symbol: str, period: str = "90d", ctx: Context = None
     ) -> Dict[str, Any]:
@@ -329,7 +365,6 @@ def register_technical_tools(mcp: FastMCP):
                 )
             return {"error": str(e)}
 
-    @mcp.tool(tags={"technical"})
     async def calculate_support_resistance(
         symbol: str, period: str = "90d", ctx: Context = None
     ) -> Dict[str, Any]:
@@ -392,7 +427,6 @@ def register_technical_tools(mcp: FastMCP):
                 )
             return {"error": str(e)}
 
-    @mcp.tool(tags={"technical"})
     async def analyze_volume_profile(
         symbol: str, period: str = "90d", ctx: Context = None
     ) -> Dict[str, Any]:
