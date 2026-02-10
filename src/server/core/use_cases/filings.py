@@ -87,6 +87,9 @@ async def process_document(
 ) -> Dict[str, Any]:
     service = Container.filings_service()
     logger.info("UseCase: process_document", doc_id=doc_id, doc_type=doc_type, ticker=ticker)
+    if ticker:
+        gateway = Container.market_gateway()
+        ticker = await gateway.resolve_ticker(ticker)
     return await service.process_document(
         doc_id=doc_id,
         url=url,
@@ -98,4 +101,7 @@ async def process_document(
 async def get_filing_markdown(ticker: str, doc_id: str) -> Dict[str, Any]:
     service = Container.filings_service()
     logger.info("UseCase: get_filing_markdown", ticker=ticker, doc_id=doc_id)
+    if ticker:
+        gateway = Container.market_gateway()
+        ticker = await gateway.resolve_ticker(ticker)
     return await service.get_filing_markdown(ticker=ticker, doc_id=doc_id)

@@ -13,6 +13,7 @@ from typing import Any, Dict
 from fastmcp import FastMCP, Context
 
 from src.server.core.use_cases import money_flow as money_flow_use_cases
+from src.server.core.dependencies import Container
 from src.server.utils.logger import logger
 from src.server.mcp.tools.artifact_utils import (
     create_artifact_envelope,
@@ -20,48 +21,20 @@ from src.server.mcp.tools.artifact_utils import (
     create_artifact_list_response,
     ComponentType,
     create_chart_artifact,
+    create_symbol_error_response,
 )
+from src.server.domain.symbols.errors import SymbolResolutionError
+from src.server.domain.symbols import to_ts_code
 
 
 def register_money_flow_tools(mcp: FastMCP):
     """Register money flow analysis tools."""
 
-    def _normalize_ticker(symbol: str) -> str:
-        if ":" in symbol:
-            return symbol.upper()
-        if "." in symbol:
-            code, suffix = symbol.split(".", 1)
-            suffix = suffix.upper()
-            if suffix == "SH":
-                return f"SSE:{code}"
-            if suffix == "SZ":
-                return f"SZSE:{code}"
-            if suffix == "BJ":
-                return f"BSE:{code}"
-            return symbol
-        s = symbol.upper().strip()
-        if len(s) == 6 and s.isdigit():
-            if s.startswith("6"):
-                return f"SSE:{s}"
-            if s.startswith(("0", "3")):
-                return f"SZSE:{s}"
-            if s.startswith("8"):
-                return f"BSE:{s}"
-        return s
+    async def _resolve_ts_code(raw_symbol: str) -> str:
+        resolved = await Container.market_gateway().resolve_ticker(raw_symbol)
+        return to_ts_code(resolved)
 
-    def _ts_code_from_symbol(symbol: str) -> str:
-        if "." in symbol:
-            return symbol.upper()
-        if ":" in symbol:
-            ex, code = symbol.split(":", 1)
-            ex = ex.upper()
-            if ex == "SSE":
-                return f"{code}.SH"
-            if ex == "SZSE":
-                return f"{code}.SZ"
-            if ex == "BSE":
-                return f"{code}.BJ"
-        return symbol.upper()
+
 
     @mcp.tool(tags={"money-flow"})
     async def get_money_flow(
@@ -87,11 +60,10 @@ def register_money_flow_tools(mcp: FastMCP):
             )
 
         try:
-            symbol = _normalize_ticker(symbol)
             logger.info("MCP tool called: get_money_flow", symbol=symbol, days=days)
             result = await money_flow_use_cases.get_money_flow(symbol, days)
             result["component_type"] = "money_flow"
-            ts_code = result.get("ts_code") or _ts_code_from_symbol(symbol)
+            ts_code = result.get("ts_code") or await _resolve_ts_code(symbol)
 
             # 构建摘要信息给 LLM（精简版）
             summary = result.get("summary", {})
@@ -156,13 +128,19 @@ def register_money_flow_tools(mcp: FastMCP):
                 artifact=artifact
             )
 
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
+            return create_symbol_error_response(
+                e, component_type="money_flow", name=f"{symbol} 资金流向"
+            )
         except Exception as e:
             logger.error(f"Get money flow failed: {e}", exc_info=True)
             if ctx:
                 await ctx.error(
                     f"❌ 获取资金流向失败: {symbol}", extra={"error": str(e)}
                 )
-            ts_code = _ts_code_from_symbol(symbol)
+            ts_code = to_ts_code(symbol)
             empty = {"ts_code": ts_code, "records": []}
             artifact = create_artifact_envelope(
                 component_type="money_flow",
@@ -292,12 +270,8 @@ def register_money_flow_tools(mcp: FastMCP):
 
             # Normalize to competitor format
             ts_code = result.get("ts_code") or result.get("symbol") or raw_symbol
-            if ":" in ts_code:
-                ts_code = ts_code.replace("SSE:", "").replace("SZSE:", "").replace("BSE:", "")
-                if ts_code.isdigit() and raw_symbol and ":" in raw_symbol:
-                    ex = raw_symbol.split(":", 1)[0]
-                    suffix = "SH" if ex == "SSE" else "SZ" if ex == "SZSE" else "BJ"
-                    ts_code = f"{ts_code}.{suffix}"
+            fallback_exchange = raw_symbol.split(":", 1)[0] if ":" in raw_symbol else None
+            ts_code = to_ts_code(ts_code, fallback_exchange=fallback_exchange)
 
             # 构建摘要
             summary = result.get("summary", {})
@@ -360,6 +334,12 @@ def register_money_flow_tools(mcp: FastMCP):
                 artifact=artifact
             )
 
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
+            return create_symbol_error_response(
+                e, component_type="chip_distribution", name=f"{symbol} 筹码分布"
+            )
         except Exception as e:
             logger.error(f"Get chip distribution failed: {e}", exc_info=True)
             if ctx:

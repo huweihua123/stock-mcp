@@ -16,10 +16,12 @@ Architecture:
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from src.server.mcp.server import create_mcp_server
 from src.server.mcp.registry import get_enabled_tool_count
 from src.server.core.bootstrap import init_adapters
+from src.server.domain.symbols.errors import SymbolResolutionError
 from src.server.core.health import router as health_router
 from src.server.api.routes import (
     market_data_router,
@@ -156,6 +158,14 @@ def create_app():
     )
 
     logger.info("✅ CORS middleware configured")
+
+    # Global exception handler for symbol resolution
+    @app.exception_handler(SymbolResolutionError)
+    async def symbol_resolution_exception_handler(_, exc: SymbolResolutionError):
+        return JSONResponse(
+            status_code=400,
+            content={"error": exc.to_dict()},
+        )
 
     # 5. Register RESTful API routes
     app.include_router(health_router, tags=["Health"])

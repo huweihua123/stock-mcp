@@ -21,7 +21,12 @@ from fastmcp import FastMCP, Context
 from src.server.core.use_cases import market as market_use_cases
 from src.server.domain.types import AssetType
 from src.server.utils.logger import logger
-from src.server.mcp.tools.artifact_utils import create_artifact_envelope, create_artifact_response
+from src.server.mcp.tools.artifact_utils import (
+    create_artifact_envelope,
+    create_artifact_response,
+    create_symbol_error_response,
+)
+from src.server.domain.symbols.errors import SymbolResolutionError
 
 
 # ============================================================
@@ -84,6 +89,12 @@ def register_asset_tools(mcp: FastMCP):
                 "component_type": "asset_info",
             }
 
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败: {ticker}", extra=e.to_dict())
+            return create_symbol_error_response(
+                e, component_type="asset_info", name=f"{ticker} 资产信息"
+            )
         except Exception as e:
             logger.error(f"Get asset info failed: {e}")
             if ctx:
@@ -148,6 +159,12 @@ def register_asset_tools(mcp: FastMCP):
                 "component_type": "real_time_price",
             }
 
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败: {ticker}", extra=e.to_dict())
+            return create_symbol_error_response(
+                e, component_type="real_time_price", name=f"{ticker} 实时报价"
+            )
         except Exception as e:
             logger.error(f"Get real-time price failed: {e}")
             if ctx:
@@ -196,6 +213,12 @@ def register_asset_tools(mcp: FastMCP):
 
             return create_artifact_response(summary=summary, artifact=artifact)
 
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败", extra=e.to_dict())
+            return create_symbol_error_response(
+                e, component_type="multiple_prices", name="批量实时报价"
+            )
         except Exception as e:
             logger.error(f"MCP tool error in get_multiple_prices: {e}", exc_info=True)
             if ctx:
@@ -269,6 +292,12 @@ def register_asset_tools(mcp: FastMCP):
             
             return create_artifact_response(summary=description, artifact=artifact)
 
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败: {ticker}", extra=e.to_dict())
+            return create_symbol_error_response(
+                e, component_type="price_chart", name=f"{ticker} 历史价格"
+            )
         except Exception as e:
             logger.error(f"Get historical prices failed: {e}")
             if ctx:

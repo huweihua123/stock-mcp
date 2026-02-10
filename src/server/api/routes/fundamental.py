@@ -12,28 +12,6 @@ from src.server.core.use_cases import fundamental as fundamental_use_cases
 router = APIRouter(prefix="/api/v1/fundamental", tags=["Fundamental Analysis"])
 
 
-def _normalize_ticker(symbol: str) -> str:
-    """Normalize ticker to internal EXCHANGE:SYMBOL format."""
-    # Already in correct format
-    if ":" in symbol:
-        return symbol.upper()
-
-    symbol = symbol.upper().strip()
-
-    # Detect A-share (Chinese stocks)
-    if len(symbol) == 6 and symbol.isdigit():
-        # 6开头 = 上交所 (SSE)
-        if symbol.startswith("6"):
-            return f"SSE:{symbol}"
-        # 0或3开头 = 深交所 (SZSE)
-        elif symbol.startswith(("0", "3")):
-            return f"SZSE:{symbol}"
-        # 8开头 = 北交所 (BSE)
-        elif symbol.startswith("8"):
-            return f"BSE:{symbol}"
-
-    # Default to NASDAQ for US stocks (most common)
-    return f"NASDAQ:{symbol}"
 
 
 @router.post(
@@ -57,15 +35,12 @@ async def get_financial_report(
     """获取财务报告分析"""
     try:
         # 标准化 ticker
-        ticker = _normalize_ticker(symbol)
-        
         logger.info(
             "API: get_financial_report called",
-            symbol=symbol,
-            normalized_ticker=ticker
+            symbol=symbol
         )
         
-        result = await fundamental_use_cases.get_fundamental_analysis(ticker)
+        result = await fundamental_use_cases.get_fundamental_analysis(symbol)
         
         return result
         
@@ -87,17 +62,15 @@ async def get_financial_ratios(
 ) -> Dict[str, Any]:
     """获取财务比率"""
     try:
-        ticker = _normalize_ticker(symbol)
-        
         logger.info("API: get_financial_ratios called", symbol=symbol)
         
         # 获取完整分析并提取比率部分
-        result = await fundamental_use_cases.get_fundamental_analysis(ticker)
+        result = await fundamental_use_cases.get_fundamental_analysis(symbol)
         
         # 如果有比率数据，返回它；否则返回整体结果
         if "ratios" in result:
             return {
-                "symbol": ticker,
+                "symbol": result.get("ticker", symbol),
                 "ratios": result["ratios"]
             }
         

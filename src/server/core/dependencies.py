@@ -10,6 +10,7 @@ from src.server.infrastructure.connections.redis_connection import RedisConnecti
 from src.server.infrastructure.connections.tushare_connection import TushareConnection
 from src.server.infrastructure.connections.finnhub_connection import FinnhubConnection
 from src.server.infrastructure.connections.baostock_connection import BaostockConnection
+from src.server.infrastructure.connections.postgres_connection import PostgresConnection
 
 # Adapters
 from src.server.domain.adapters.yahoo_adapter import YahooAdapter
@@ -54,6 +55,22 @@ class Container(containers.DeclarativeContainer):
         BaostockConnection,
         config=providers.Callable(lambda cfg: cfg.baostock.model_dump(), config),
     )
+    postgres = providers.Singleton(
+        PostgresConnection,
+        config=providers.Callable(
+            lambda cfg: {
+                "dsn": cfg.postgres.build_asyncpg_dsn(),
+                "host": cfg.postgres.host,
+                "port": cfg.postgres.port,
+                "user": cfg.postgres.user,
+                "password": cfg.postgres.password,
+                "database": cfg.postgres.database,
+                "pool_min": cfg.postgres.pool_min,
+                "pool_max": cfg.postgres.pool_max,
+            },
+            config,
+        ),
+    )
 
     # Cache (wrap Redis client)
     cache = providers.Singleton(AsyncRedisCache, redis_client=redis)
@@ -91,6 +108,26 @@ class Container(containers.DeclarativeContainer):
 
     adapter_manager = providers.Singleton(AdapterManager)
 
+    # Security Master
+    from src.server.domain.security_master import SecurityMasterRepository
+
+    security_master_repo = providers.Singleton(SecurityMasterRepository, postgres_conn=postgres)
+
+    # Symbol resolver & gateway
+    from src.server.domain.symbols import SymbolResolver
+    from src.server.domain.market_gateway import MarketGateway
+
+    symbol_resolver = providers.Singleton(
+        SymbolResolver,
+        security_master_repo=security_master_repo,
+        adapter_manager=adapter_manager,
+    )
+    market_gateway = providers.Singleton(
+        MarketGateway,
+        adapter_manager=adapter_manager,
+        symbol_resolver=symbol_resolver,
+    )
+
     # MinIO Client
     from src.server.infrastructure.minio_client import MinioClient
 
@@ -99,34 +136,34 @@ class Container(containers.DeclarativeContainer):
     # Services (receive adapter manager and cache)
     fundamental_service = providers.Factory(
         FundamentalService,
-        adapter_manager=adapter_manager,
+        adapter_manager=market_gateway,
         cache=cache,
     )
     news_service = providers.Factory(
         NewsService,
-        adapter_manager=adapter_manager,
+        adapter_manager=market_gateway,
         cache=cache,
         api_keys=providers.Callable(lambda cfg: cfg.api_keys.model_dump(), config),
     )
     technical_service = providers.Factory(
         TechnicalService,
-        adapter_manager=adapter_manager,
+        adapter_manager=market_gateway,
     )
     filings_service = providers.Factory(
         FilingsService,
-        adapter_manager=adapter_manager,
+        adapter_manager=market_gateway,
         minio_client=minio_client,
     )
 
     # 资金流向服务
     money_flow_service = providers.Factory(
         MoneyFlowService,
-        adapter_manager=adapter_manager,
+        adapter_manager=market_gateway,
     )
 
     # 筹码分布服务
     chip_service = providers.Factory(
         ChipService,
-        adapter_manager=adapter_manager,
+        adapter_manager=market_gateway,
         cache=cache,
     )

@@ -12,32 +12,6 @@ from src.server.core.use_cases import money_flow as money_flow_use_cases
 router = APIRouter(prefix="/api/v1/money-flow", tags=["Money Flow Analysis"])
 
 
-def _normalize_ticker(symbol: str) -> str:
-    """Normalize ticker to internal EXCHANGE:SYMBOL format."""
-    if ":" in symbol:
-        return symbol.upper()
-
-    if "." in symbol:
-        code, suffix = symbol.split(".", 1)
-        suffix = suffix.upper()
-        if suffix == "SH":
-            return f"SSE:{code}"
-        elif suffix == "SZ":
-            return f"SZSE:{code}"
-        elif suffix == "BJ":
-            return f"BSE:{code}"
-        return symbol
-
-    symbol = symbol.upper().strip()
-    if len(symbol) == 6 and symbol.isdigit():
-        if symbol.startswith("6"):
-            return f"SSE:{symbol}"
-        elif symbol.startswith(("0", "3")):
-            return f"SZSE:{symbol}"
-        elif symbol.startswith("8"):
-            return f"BSE:{symbol}"
-
-    return f"NASDAQ:{symbol}"
 
 
 @router.get(
@@ -61,16 +35,13 @@ async def get_stock_money_flow(
 ) -> Dict[str, Any]:
     """获取个股资金流向数据"""
     try:
-        ticker = _normalize_ticker(symbol)
-
         logger.info(
             "API: get_stock_money_flow called",
             symbol=symbol,
-            normalized_ticker=ticker,
             days=days,
         )
 
-        result = await money_flow_use_cases.get_money_flow(ticker, days)
+        result = await money_flow_use_cases.get_money_flow(symbol, days)
 
         return {"code": 0, "message": "success", "data": result}
 
@@ -140,16 +111,13 @@ async def get_chip_distribution(
 ) -> Dict[str, Any]:
     """获取筹码分布数据"""
     try:
-        ticker = _normalize_ticker(symbol)
-
         logger.info(
             "API: get_chip_distribution called",
             symbol=symbol,
-            normalized_ticker=ticker,
             days=days,
         )
 
-        result = await money_flow_use_cases.get_chip_distribution(ticker, days)
+        result = await money_flow_use_cases.get_chip_distribution(symbol, days)
 
         return {"code": 0, "message": "success", "data": result}
 
@@ -159,4 +127,3 @@ async def get_chip_distribution(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get chip distribution: {str(e)}",
         )
-

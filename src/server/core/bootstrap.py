@@ -35,6 +35,16 @@ async def init_adapters() -> None:
         await redis.connect()
         logger.info("✅ Redis connection established")
 
+        # Initialize PostgreSQL (Security Master)
+        postgres = Container.postgres()
+        postgres_ok = await postgres.connect()
+        if postgres_ok:
+            logger.info("✅ PostgreSQL connection established")
+            security_master_repo = Container.security_master_repo()
+            await security_master_repo.ensure_schema()
+        else:
+            logger.warning("⚠️ PostgreSQL not available, Security Master will be degraded")
+
         config = Container.config()
 
         # Initialize Tushare (optional)
@@ -97,5 +107,9 @@ async def init_adapters() -> None:
 
 async def shutdown_adapters() -> None:
     """Placeholder for future graceful shutdown logic."""
-    # No-op for now; keep for symmetry and future extensions.
+    try:
+        postgres = Container.postgres()
+        await postgres.disconnect()
+    except Exception:
+        pass
     return None

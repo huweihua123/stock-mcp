@@ -13,11 +13,14 @@ from .base import AsyncDataSourceConnection
 from .redis_connection import RedisConnection
 from .tushare_connection import TushareConnection
 from .finnhub_connection import FinnhubConnection
+from .baostock_connection import BaostockConnection
+from .postgres_connection import PostgresConnection
 
 __all__ = [
     "AsyncDataSourceConnection",
     "RedisConnection",
     "TushareConnection",
     "FinnhubConnection",
-    "MySQLConnection",
+    "BaostockConnection",
+    "PostgresConnection",
 ]

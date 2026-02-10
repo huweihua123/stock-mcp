@@ -84,6 +84,36 @@ class ProxyConfig(BaseAppSettings):
     enabled: bool = Field(False, validation_alias="PROXY_ENABLED")
 
 
+class PostgresConfig(BaseAppSettings):
+    """PostgreSQL configuration for Security Master and other persistence."""
+
+    dsn: str = Field("", validation_alias="DATABASE_URL")
+    host: str = Field("localhost", validation_alias="POSTGRES_HOST")
+    port: int = Field(5432, validation_alias="POSTGRES_PORT")
+    user: str = Field("postgres", validation_alias="POSTGRES_USER")
+    password: str = Field("", validation_alias="POSTGRES_PASSWORD")
+    database: str = Field("valuecell", validation_alias="POSTGRES_DB")
+    pool_min: int = Field(1, validation_alias="POSTGRES_POOL_MIN")
+    pool_max: int = Field(10, validation_alias="POSTGRES_POOL_MAX")
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.dsn or self.database)
+
+    def build_dsn(self) -> str:
+        if self.dsn:
+            return self.dsn
+        return (
+            f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+        )
+
+    def build_asyncpg_dsn(self) -> str:
+        dsn = self.build_dsn()
+        if dsn.startswith("postgresql+asyncpg://"):
+            dsn = dsn.replace("postgresql+asyncpg://", "postgresql://", 1)
+        return dsn
+
+
 class Settings(BaseAppSettings):
     redis: RedisConfig = Field(default_factory=RedisConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
@@ -92,6 +122,7 @@ class Settings(BaseAppSettings):
     baostock: BaostockConfig = Field(default_factory=BaostockConfig)
     api_keys: APIKeysConfig = Field(default_factory=APIKeysConfig)
     proxy: ProxyConfig = Field(default_factory=ProxyConfig)
+    postgres: PostgresConfig = Field(default_factory=PostgresConfig)
 
     # Other optional configs
     cors_origins: str = Field(default="*", validation_alias="CORS_ORIGINS")

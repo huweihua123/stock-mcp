@@ -9,16 +9,24 @@ from typing import Any, Dict
 from fastmcp import FastMCP, Context
 
 from src.server.core.use_cases import fundamental as fundamental_use_cases
+from src.server.core.dependencies import Container
 from src.server.utils.logger import logger
 from src.server.mcp.tools.artifact_utils import (
     create_artifact_envelope,
     create_artifact_response,
     create_artifact_list_response,
     create_chart_artifact,
+    create_symbol_error_response,
 )
+from src.server.domain.symbols.errors import SymbolResolutionError
+from src.server.domain.symbols import to_ts_code
 
 
 def register_fundamental_tools(mcp: FastMCP):
+    async def _resolve_ts_code(raw_symbol: str) -> str:
+        resolved = await Container.market_gateway().resolve_ticker(raw_symbol)
+        return to_ts_code(resolved)
+
     async def _get_financial_reports_impl(symbol: str, ctx: Context = None) -> Dict[str, Any]:
         """Implementation of get_financial_reports logic."""
         if ctx:
@@ -27,13 +35,9 @@ def register_fundamental_tools(mcp: FastMCP):
         try:
             logger.info("MCP tool called: get_financial_reports", symbol=symbol)
 
-            # Normalize ticker to EXCHANGE:SYMBOL format
-            ticker = _normalize_ticker(symbol)
-            logger.info(f"Normalized ticker: {symbol} -> {ticker}")
-
-            financials = await fundamental_use_cases.get_financials(ticker)
+            financials = await fundamental_use_cases.get_financials(symbol)
             income = financials.get("income_statement") or []
-            ts_code = financials.get("ts_code") or _ticker_to_ts_code(ticker)
+            ts_code = financials.get("ts_code") or await _resolve_ts_code(symbol)
 
             def _first_value(row: Dict[str, Any], keys: list[str]) -> Any:
                 for key in keys:
@@ -216,6 +220,12 @@ def register_fundamental_tools(mcp: FastMCP):
                 artifacts=artifacts
             )
             
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
+            return create_symbol_error_response(
+                e, component_type="financial_chart", name=f"{symbol} 财务报告"
+            )
         except Exception as e:
             logger.error(f"Get financial report failed: {e}")
             if ctx:
@@ -254,13 +264,11 @@ def register_fundamental_tools(mcp: FastMCP):
             await ctx.info(f"🔧 获取主营业务构成: {raw_symbol}", extra={"symbol": raw_symbol})
 
         try:
-            ticker = _normalize_ticker(raw_symbol)
-            ts_code = _ticker_to_ts_code(ticker)
             logger.info("MCP tool called: get_mainbz_info", symbol=raw_symbol)
-            logger.info(f"Normalized ticker: {raw_symbol} -> {ticker}")
 
-            data = await fundamental_use_cases.get_mainbz_info(ticker)
+            data = await fundamental_use_cases.get_mainbz_info(raw_symbol)
             rows = data.get("rows", [])
+            ts_code = data.get("ts_code") or await _resolve_ts_code(raw_symbol)
 
             type_map = {
                 "P": ("分产品", "产品"),
@@ -325,6 +333,12 @@ def register_fundamental_tools(mcp: FastMCP):
                 artifacts=artifacts
             )
 
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
+            return create_symbol_error_response(
+                e, component_type="main_business", name=f"{symbol} 主营业务构成"
+            )
         except Exception as e:
             logger.error(f"Get main business info failed: {e}")
             if ctx:
@@ -348,13 +362,11 @@ def register_fundamental_tools(mcp: FastMCP):
             await ctx.info(f"🔧 获取股东信息: {raw_symbol}", extra={"symbol": raw_symbol})
 
         try:
-            ticker = _normalize_ticker(raw_symbol)
-            ts_code = _ticker_to_ts_code(ticker)
             logger.info("MCP tool called: get_shareholder_info", symbol=raw_symbol)
-            logger.info(f"Normalized ticker: {raw_symbol} -> {ticker}")
 
-            data = await fundamental_use_cases.get_shareholder_info(ticker)
+            data = await fundamental_use_cases.get_shareholder_info(raw_symbol)
             holder_data = data.get("data", {})
+            ts_code = data.get("ts_code") or await _resolve_ts_code(raw_symbol)
 
             def _latest_by_date(rows: list[dict], date_key: str) -> tuple[str, list[dict]]:
                 if not rows:
@@ -539,6 +551,12 @@ def register_fundamental_tools(mcp: FastMCP):
                 artifacts=artifacts
             )
 
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
+            return create_symbol_error_response(
+                e, component_type="shareholder_info", name=f"{symbol} 股东信息"
+            )
         except Exception as e:
             logger.error(f"Get shareholder info failed: {e}")
             if ctx:
@@ -564,13 +582,11 @@ def register_fundamental_tools(mcp: FastMCP):
             await ctx.info(f"🔧 获取分红送股信息: {symbol}", extra={"symbol": symbol})
 
         try:
-            ticker = _normalize_ticker(symbol)
             logger.info("MCP tool called: get_dividend_info", symbol=symbol)
-            logger.info(f"Normalized ticker: {symbol} -> {ticker}")
 
-            data = await fundamental_use_cases.get_dividend_info(ticker)
+            data = await fundamental_use_cases.get_dividend_info(symbol)
             rows = data.get("rows", [])
-            ts_code = _ticker_to_ts_code(ticker)
+            ts_code = data.get("ts_code") or await _resolve_ts_code(symbol)
 
             columns = [
                 {"key": "end_date", "label": "分红年度"},
@@ -619,6 +635,12 @@ def register_fundamental_tools(mcp: FastMCP):
                 artifact=table_artifact
             )
 
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
+            return create_symbol_error_response(
+                e, component_type="dividend_info", name=f"{symbol} 分红送股"
+            )
         except Exception as e:
             logger.error(f"Get dividend info failed: {e}")
             if ctx:
@@ -627,51 +649,3 @@ def register_fundamental_tools(mcp: FastMCP):
                     extra={"error": str(e)}
                 )
             return {"error": str(e)}
-
-
-def _normalize_ticker(symbol: str) -> str:
-    """Normalize ticker to internal EXCHANGE:SYMBOL format."""
-    # Already in correct format
-    if ":" in symbol:
-        return symbol.upper()
-
-    symbol = symbol.upper().strip()
-
-    # Detect ts_code format (e.g., 600519.SH)
-    if "." in symbol:
-        code, suffix = symbol.split(".", 1)
-        if suffix == "SH":
-            return f"SSE:{code}"
-        if suffix == "SZ":
-            return f"SZSE:{code}"
-        if suffix == "BJ":
-            return f"BSE:{code}"
-
-    # Detect A-share (Chinese stocks)
-    if len(symbol) == 6 and symbol.isdigit():
-        # 6开头 = 上交所 (SSE)
-        if symbol.startswith("6"):
-            return f"SSE:{symbol}"
-        # 0或3开头 = 深交所 (SZSE)
-        elif symbol.startswith(("0", "3")):
-            return f"SZSE:{symbol}"
-        # 8开头 = 北交所 (BSE)
-        elif symbol.startswith("8"):
-            return f"BSE:{symbol}"
-
-    # Default to NASDAQ for US stocks (most common)
-    return f"NASDAQ:{symbol}"
-
-
-def _ticker_to_ts_code(ticker: str) -> str:
-    """Convert internal EXCHANGE:SYMBOL ticker to ts_code format."""
-    if ":" not in ticker:
-        return ticker
-    exchange, symbol = ticker.split(":", 1)
-    if exchange == "SSE":
-        return f"{symbol}.SH"
-    if exchange == "SZSE":
-        return f"{symbol}.SZ"
-    if exchange == "BSE":
-        return f"{symbol}.BJ"
-    return symbol

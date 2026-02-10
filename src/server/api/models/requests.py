@@ -22,7 +22,7 @@ class GetMultiplePricesRequest(BaseModel):
     
     tickers: List[str] = Field(
         ..., 
-        description="资产代码列表(必须带前缀): 美股NASDAQ:xx/NYSE:xx, A股SSE:xx/SZSE:xx, 加密货币CRYPTO:xx",
+        description="资产代码列表(支持带前缀或无前缀): 美股NASDAQ:xx/NYSE:xx 或 AAPL, A股SSE:xx/SZSE:xx 或 600519, 加密货币CRYPTO:xx 或 BTC",
         min_length=1,
         max_length=100,
         examples=[["CRYPTO:BTC", "NASDAQ:AAPL", "SSE:600519"]]
@@ -33,14 +33,13 @@ class GetMultiplePricesRequest(BaseModel):
     def validate_tickers(cls, v):
         """验证 ticker 格式必须为 PREFIX:SYMBOL"""
         for ticker in v:
-            if ":" not in ticker:
-                raise ValueError(
-                    f"Invalid ticker format: '{ticker}'. Expected 'PREFIX:SYMBOL' "
-                    f"(e.g., 'CRYPTO:BTC', 'NASDAQ:AAPL', 'SSE:600519')"
-                )
-            parts = ticker.split(":")
-            if len(parts) != 2 or not all(part.strip() for part in parts):
-                raise ValueError(f"Invalid ticker format: '{ticker}'")
+            if ":" in ticker:
+                parts = ticker.split(":")
+                if len(parts) != 2 or not all(part.strip() for part in parts):
+                    raise ValueError(f"Invalid ticker format: '{ticker}'")
+            else:
+                if not ticker or not ticker.strip():
+                    raise ValueError(f"Invalid ticker format: '{ticker}'")
         return v
     
     class Config:
@@ -61,8 +60,8 @@ class CalculateTechnicalIndicatorsRequest(BaseModel):
     
     symbol: str = Field(
         ..., 
-        description="资产代码(必须带前缀): 美股NASDAQ:xx, A股SSE:xx/SZSE:xx, 加密货币CRYPTO:xx",
-        examples=["CRYPTO:BTC", "NASDAQ:AAPL", "SSE:600519"]
+        description="资产代码(支持带前缀或无前缀): 美股NASDAQ:xx 或 AAPL, A股SSE:xx/SZSE:xx 或 600519, 加密货币CRYPTO:xx 或 BTC",
+        examples=["CRYPTO:BTC", "NASDAQ:AAPL", "SSE:600519", "AAPL", "600519"]
     )
     period: str = Field(
         default="30d",
@@ -80,14 +79,13 @@ class CalculateTechnicalIndicatorsRequest(BaseModel):
     @classmethod
     def validate_symbol(cls, v):
         """验证 symbol 格式必须为 PREFIX:SYMBOL"""
-        if ":" not in v:
-            raise ValueError(
-                f"Invalid symbol format: '{v}'. Expected 'PREFIX:SYMBOL' "
-                f"(e.g., 'CRYPTO:BTC', 'NASDAQ:AAPL', 'SSE:600519')"
-            )
-        parts = v.split(":")
-        if len(parts) != 2 or not all(part.strip() for part in parts):
-            raise ValueError(f"Invalid symbol format: '{v}'")
+        if ":" in v:
+            parts = v.split(":")
+            if len(parts) != 2 or not all(part.strip() for part in parts):
+                raise ValueError(f"Invalid symbol format: '{v}'")
+        else:
+            if not v or not v.strip():
+                raise ValueError(f"Invalid symbol format: '{v}'")
         return v
     
     class Config:

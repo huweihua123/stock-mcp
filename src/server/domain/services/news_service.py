@@ -33,21 +33,6 @@ class NewsService:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
 
-    def _normalize_ticker(self, ticker: str) -> str:
-        """Normalize ticker format."""
-        ticker = ticker.upper().strip()
-        if ":" in ticker:
-            return ticker
-        if ticker.isdigit() and len(ticker) == 6:
-            if ticker.startswith("6"):
-                return f"SSE:{ticker}"
-            elif ticker.startswith(("0", "3")):
-                return f"SZSE:{ticker}"
-            elif ticker.startswith("8"):
-                return f"BSE:{ticker}"
-        if ticker.isdigit() and len(ticker) == 5:
-            return f"HKEX:{ticker.zfill(5)}"
-        return f"NASDAQ:{ticker}"
 
     def _get_news_adapter_for_ticker(self, ticker: str):
         """Get adapter that supports news for the ticker."""
@@ -229,7 +214,7 @@ class NewsService:
         self, ticker: str, days_back: int = 30
     ) -> Dict[str, Any]:
         """Get latest news for a ticker."""
-        std_ticker = self._normalize_ticker(ticker)
+        std_ticker = await self.adapter_manager.resolve_ticker(ticker)
         cache_key = f"news_json:{std_ticker}:{days_back}"
         cached = await self.cache.get(cache_key)
         if cached:

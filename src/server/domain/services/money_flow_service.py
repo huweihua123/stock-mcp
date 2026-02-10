@@ -36,8 +36,7 @@ class MoneyFlowService:
         Returns:
             结构化的资金流向数据
         """
-        ticker = self._normalize_to_internal(symbol)
-
+        ticker = symbol
         self.logger.info(f"Getting money flow for {ticker}, days={days}")
 
         try:
@@ -65,30 +64,3 @@ class MoneyFlowService:
         except Exception as e:
             self.logger.error(f"Failed to get north bound flow: {e}")
             return {"error": str(e), "component_type": "north_bound_flow"}
-
-    def _normalize_to_internal(self, symbol: str) -> str:
-        """将各种格式转换为内部格式 (SSE:600519)"""
-        if ":" in symbol:
-            return symbol.upper()
-
-        if "." in symbol:
-            code, suffix = symbol.split(".", 1)
-            suffix = suffix.upper()
-            if suffix == "SH":
-                return f"SSE:{code}"
-            elif suffix == "SZ":
-                return f"SZSE:{code}"
-            elif suffix == "BJ":
-                return f"BSE:{code}"
-            return symbol
-
-        symbol = symbol.upper().strip()
-        if len(symbol) == 6 and symbol.isdigit():
-            if symbol.startswith("6"):
-                return f"SSE:{symbol}"
-            elif symbol.startswith(("0", "3")):
-                return f"SZSE:{symbol}"
-            elif symbol.startswith("8"):
-                return f"BSE:{symbol}"
-
-        return symbol

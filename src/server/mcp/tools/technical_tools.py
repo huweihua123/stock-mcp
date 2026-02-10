@@ -19,10 +19,14 @@ from fastmcp import FastMCP, Context
 
 from src.server.utils.logger import logger
 from src.server.core.use_cases import technical as technical_use_cases
+from src.server.core.dependencies import Container
 from src.server.mcp.tools.artifact_utils import (
     create_artifact_envelope,
     create_artifact_response,
+    create_symbol_error_response,
 )
+from src.server.domain.symbols.errors import SymbolResolutionError
+from src.server.domain.symbols import to_ts_code
 
 
 # ============================================================
@@ -38,42 +42,11 @@ from src.server.mcp.tools.artifact_utils import (
 def register_technical_tools(mcp: FastMCP):
     """Register technical analysis tools."""
 
-    def _normalize_ticker(symbol: str) -> str:
-        if ":" in symbol:
-            return symbol.upper()
-        if "." in symbol:
-            code, suffix = symbol.split(".", 1)
-            suffix = suffix.upper()
-            if suffix == "SH":
-                return f"SSE:{code}"
-            if suffix == "SZ":
-                return f"SZSE:{code}"
-            if suffix == "BJ":
-                return f"BSE:{code}"
-            return symbol
-        s = symbol.upper().strip()
-        if len(s) == 6 and s.isdigit():
-            if s.startswith("6"):
-                return f"SSE:{s}"
-            if s.startswith(("0", "3")):
-                return f"SZSE:{s}"
-            if s.startswith("8"):
-                return f"BSE:{s}"
-        return s
+    async def _resolve_ts_code(raw_symbol: str) -> str:
+        resolved = await Container.market_gateway().resolve_ticker(raw_symbol)
+        return to_ts_code(resolved)
 
-    def _ts_code_from_symbol(symbol: str) -> str:
-        if "." in symbol:
-            return symbol.upper()
-        if ":" in symbol:
-            ex, code = symbol.split(":", 1)
-            ex = ex.upper()
-            if ex == "SSE":
-                return f"{code}.SH"
-            if ex == "SZSE":
-                return f"{code}.SZ"
-            if ex == "BSE":
-                return f"{code}.BJ"
-        return symbol.upper()
+
 
     async def calculate_technical_indicators(
         symbol: str,
@@ -119,7 +92,6 @@ def register_technical_tools(mcp: FastMCP):
             )
 
         try:
-            symbol = _normalize_ticker(symbol)
             logger.info(
                 "MCP tool called: calculate_technical_indicators",
                 symbol=symbol,
@@ -210,7 +182,7 @@ def register_technical_tools(mcp: FastMCP):
             # 对齐竞品: 只返回行记录列表
             content = rows
 
-            ts_code = result.get("ts_code") or _ts_code_from_symbol(symbol)
+            ts_code = result.get("ts_code") or await _resolve_ts_code(symbol)
             name = f"Technical Indicators: {ts_code}"
 
             # 对齐竞品描述
@@ -234,6 +206,12 @@ def register_technical_tools(mcp: FastMCP):
                 display_in_report=True,
             )
             return create_artifact_response(summary=metadata, artifact=artifact)
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
+            return create_symbol_error_response(
+                e, component_type="technical_indicators", name=f"{symbol} 技术指标"
+            )
         except Exception as e:
             error_msg = f"MCP tool error in calculate_technical_indicators: {e}"
             logger.error(error_msg, exc_info=True)
@@ -260,7 +238,7 @@ def register_technical_tools(mcp: FastMCP):
         Returns:
             ArtifactEnvelope containing indicator rows
         """
-        symbol = _normalize_ticker(ts_code)
+        symbol = ts_code
         if ctx:
             await ctx.info(
                 f"🔧 获取技术指标: {ts_code}",
@@ -272,7 +250,7 @@ def register_technical_tools(mcp: FastMCP):
                 symbol, "30d", "1d", limit
             )
             result["component_type"] = "technical_indicators"
-            result["ts_code"] = _ts_code_from_symbol(symbol)
+            result["ts_code"] = to_ts_code(symbol) if "." in symbol else await _resolve_ts_code(symbol)
 
             content = result.get("rows") if isinstance(result.get("rows"), list) else result
 
@@ -300,6 +278,12 @@ def register_technical_tools(mcp: FastMCP):
                 display_in_report=True,
             )
             return create_artifact_response(summary=description, artifact=artifact)
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败: {ts_code}", extra=e.to_dict())
+            return create_symbol_error_response(
+                e, component_type="technical_indicators", name=f"{ts_code} 技术指标"
+            )
         except Exception as e:
             logger.error(f"Get technical indicators failed: {e}", exc_info=True)
             if ctx:
@@ -357,6 +341,12 @@ def register_technical_tools(mcp: FastMCP):
             )
             return create_artifact_response(summary=description, artifact=artifact)
 
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
+            return create_symbol_error_response(
+                e, component_type="price_patterns", name=f"{symbol} 价格形态"
+            )
         except Exception as e:
             logger.error(f"Analyze price patterns failed: {e}")
             if ctx:
@@ -419,6 +409,12 @@ def register_technical_tools(mcp: FastMCP):
             )
             return create_artifact_response(summary=description, artifact=artifact)
 
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
+            return create_symbol_error_response(
+                e, component_type="support_resistance", name=f"{symbol} 支撑/阻力位"
+            )
         except Exception as e:
             logger.error(f"Calculate support/resistance failed: {e}")
             if ctx:
@@ -477,6 +473,12 @@ def register_technical_tools(mcp: FastMCP):
             )
             return create_artifact_response(summary=description, artifact=artifact)
 
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
+            return create_symbol_error_response(
+                e, component_type="volume_profile", name=f"{symbol} 成交量分布"
+            )
         except Exception as e:
             logger.error(f"Analyze volume profile failed: {e}")
             if ctx:

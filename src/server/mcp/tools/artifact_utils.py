@@ -195,6 +195,30 @@ def create_table_artifact(
     )
 
 
+def create_symbol_error_response(
+    error: Exception,
+    component_type: Union[str, ComponentType],
+    name: str,
+) -> Dict[str, Any]:
+    """Create a consistent response for symbol resolution errors."""
+    message = str(error)
+    details = None
+    if hasattr(error, "to_dict"):
+        details = error.to_dict()
+        message = details.get("message") or message
+    summary = f"符号解析失败: {message}"
+    content = {"error": details or {"message": message}}
+    artifact = create_artifact_envelope(
+        component_type=component_type,
+        name=name,
+        content=content,
+        description=summary,
+        visible_to_llm=True,
+        display_in_report=True,
+    )
+    return create_artifact_response(summary=summary, artifact=artifact)
+
+
 def create_market_liquidity_artifact(
     north_flow: List[Dict[str, Any]],
     margin: List[Dict[str, Any]],

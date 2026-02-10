@@ -14,7 +14,9 @@ from src.server.utils.logger import logger
 from src.server.mcp.tools.artifact_utils import (
     create_artifact_envelope,
     create_artifact_response,
+    create_symbol_error_response,
 )
+from src.server.domain.symbols.errors import SymbolResolutionError
 
 
 def register_filings_tools(mcp: FastMCP):
@@ -110,6 +112,12 @@ def register_filings_tools(mcp: FastMCP):
             )
             return create_artifact_response(summary=description, artifact=artifact)
 
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败: {ticker}", extra=e.to_dict())
+            return create_symbol_error_response(
+                e, component_type="table", name=f"{ticker} SEC定期报告"
+            )
         except Exception as e:
             logger.error(f"Fetch periodic SEC filings failed: {e}")
             if ctx:
@@ -209,6 +217,12 @@ def register_filings_tools(mcp: FastMCP):
             )
             return create_artifact_response(summary=description, artifact=artifact)
 
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败: {ticker}", extra=e.to_dict())
+            return create_symbol_error_response(
+                e, component_type="table", name=f"{ticker} SEC临时报告"
+            )
         except Exception as e:
             logger.error(f"Fetch event SEC filings failed: {e}")
             if ctx:
@@ -304,6 +318,12 @@ def register_filings_tools(mcp: FastMCP):
             )
             return create_artifact_response(summary=description, artifact=artifact)
 
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
+            return create_symbol_error_response(
+                e, component_type="table", name=f"{symbol} A股公告"
+            )
         except Exception as e:
             logger.error(f"Fetch A-share filings failed: {e}")
             if ctx:
@@ -366,6 +386,12 @@ def register_filings_tools(mcp: FastMCP):
                 
             return result
 
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败: {ticker}", extra=e.to_dict())
+            return create_symbol_error_response(
+                e, component_type="filing_document", name=f"{ticker} 文档处理"
+            )
         except Exception as e:
             logger.error(f"Process document failed: {e}")
             if ctx:
