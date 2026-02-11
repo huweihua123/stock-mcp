@@ -1,0 +1,42 @@
+[
+  {
+    "alias": "苹果",
+    "normalized": "NASDAQ:AAPL",
+    "asset_type": "stock",
+    "source": "seed",
+    "confidence": 1.0,
+    "locale": "zh-CN"
+  },
+  {
+    "alias": "平安银行",
+    "normalized": "SZSE:000001",
+    "asset_type": "stock",
+    "source": "seed",
+    "confidence": 1.0,
+    "locale": "zh-CN"
+  },
+  {
+    "alias": "白银期货",
+    "normalized": "COMEX:SI",
+    "asset_type": "commodity_future",
+    "source": "seed",
+    "confidence": 1.0,
+    "locale": "zh-CN"
+  },
+  {
+    "alias": "白银现货",
+    "normalized": "OTC:XAGUSD",
+    "asset_type": "commodity_spot",
+    "source": "seed",
+    "confidence": 1.0,
+    "locale": "zh-CN"
+  },
+  {
+    "alias": "比特币",
+    "normalized": "CRYPTO:BTC",
+    "asset_type": "crypto",
+    "source": "seed",
+    "confidence": 1.0,
+    "locale": "zh-CN"
+  }
+]

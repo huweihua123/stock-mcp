@@ -14,6 +14,18 @@ class ResolutionStatus(str, Enum):
     INVALID = "invalid"
 
 
+class InstrumentRef(BaseModel):
+    canonical_id: str
+    normalized: str
+    asset_type: str
+    exchange: str
+    raw_input: str
+    base: Optional[str] = None
+    quote: Optional[str] = None
+    contract: Optional[str] = None
+    aliases: List[str] = Field(default_factory=list)
+
+
 class SymbolCandidate(BaseModel):
     ticker: str
     exchange: Optional[str] = None
@@ -29,5 +41,7 @@ class SymbolResolution(BaseModel):
     exchange: Optional[str] = None
     asset_id: Optional[str] = None
     asset_type: Optional[str] = None
+    canonical_id: Optional[str] = None
     reason: Optional[str] = None
     candidates: List[SymbolCandidate] = Field(default_factory=list)
+    instrument: Optional[InstrumentRef] = None

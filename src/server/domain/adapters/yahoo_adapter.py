@@ -82,6 +82,16 @@ class YahooAdapter(BaseDataAdapter):
             AdapterCapability(
                 asset_type=AssetType.CRYPTO, exchanges={Exchange.CRYPTO}
             ),
+            AdapterCapability(
+                asset_type=AssetType.FX, exchanges={Exchange.FOREX}
+            ),
+            AdapterCapability(
+                asset_type=AssetType.COMMODITY_SPOT, exchanges={Exchange.OTC}
+            ),
+            AdapterCapability(
+                asset_type=AssetType.COMMODITY_FUTURE,
+                exchanges={Exchange.COMEX, Exchange.NYMEX, Exchange.CME, Exchange.ICE},
+            ),
         ]
 
     def get_supported_asset_types(self) -> List[AssetType]:
@@ -90,8 +100,10 @@ class YahooAdapter(BaseDataAdapter):
             AssetType.STOCK,
             AssetType.ETF,
             AssetType.INDEX,
-            AssetType.FOREX,
-            AssetType.CRYPTO,  # Add support for Crypto
+            AssetType.FX,
+            AssetType.COMMODITY_SPOT,
+            AssetType.COMMODITY_FUTURE,
+            AssetType.CRYPTO,
         ]
 
     def convert_to_source_ticker(self, ticker: str) -> str:
@@ -115,6 +127,20 @@ class YahooAdapter(BaseDataAdapter):
                     return f"{base}-USD"
                 return f"{base}-{quote}"
             return f"{symbol}-USD"
+
+        # Handle FX (Yahoo: EURUSD=X)
+        if exchange == "FOREX":
+            return f"{symbol}=X"
+
+        # Handle commodity spot (Yahoo: XAUUSD=X, XAGUSD=X)
+        if exchange == "OTC":
+            return f"{symbol}=X"
+
+        # Handle commodity futures (Yahoo: GC=F, SI=F, CL=F)
+        if exchange in ["COMEX", "NYMEX", "CME", "ICE"]:
+            if symbol.endswith("=F"):
+                return symbol
+            return f"{symbol}=F"
 
         # Handle US stocks (no suffix)
         if exchange in ["NASDAQ", "NYSE", "AMEX", "US"]:
@@ -144,6 +170,26 @@ class YahooAdapter(BaseDataAdapter):
         self, source_ticker: str, default_exchange: Optional[str] = None
     ) -> str:
         """Convert Yahoo Finance format to EXCHANGE:SYMBOL."""
+        # FX and commodity spot symbols: EURUSD=X, XAUUSD=X
+        if source_ticker.endswith("=X"):
+            core = source_ticker.replace("=X", "").upper()
+            if core in {"XAUUSD", "XAGUSD", "XPTUSD", "XPDUSD"}:
+                return f"OTC:{core}"
+            if len(core) == 6 and core.isalpha():
+                return f"FOREX:{core}"
+            return f"OTC:{core}"
+
+        # Commodity futures: GC=F, SI=F
+        if source_ticker.endswith("=F"):
+            core = source_ticker.replace("=F", "").upper()
+            comex = {"GC", "SI", "HG"}
+            nymex = {"CL", "NG"}
+            if core in comex:
+                return f"COMEX:{core}"
+            if core in nymex:
+                return f"NYMEX:{core}"
+            return f"CME:{core}"
+
         # Special handling for indices from yfinance - remove ^ prefix
         if source_ticker.startswith("^"):
             symbol = source_ticker[1:]  # Remove ^ prefix
@@ -241,9 +287,19 @@ class YahooAdapter(BaseDataAdapter):
             yf_exchange = info.get("exchange", "")
             exchange = exchange_map.get(yf_exchange, yf_exchange)
 
+            asset_type = AssetType.STOCK
+            if ":" in ticker:
+                exchange = ticker.split(":", 1)[0]
+                if exchange == "FOREX":
+                    asset_type = AssetType.FX
+                elif exchange == "OTC":
+                    asset_type = AssetType.COMMODITY_SPOT
+                elif exchange in {"COMEX", "NYMEX", "CME", "ICE"}:
+                    asset_type = AssetType.COMMODITY_FUTURE
+
             asset = Asset(
                 ticker=ticker,
-                asset_type=AssetType.STOCK,  # Default to STOCK
+                asset_type=asset_type,
                 name=info.get("longName") or info.get("shortName") or ticker,
                 market_info=MarketInfo(
                     exchange=exchange,

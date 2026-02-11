@@ -1,0 +1,76 @@
+{
+  "routing_policy": [
+    {
+      "asset_type": "commodity_spot",
+      "data_type": "historical",
+      "exchange": "OTC",
+      "providers": ["twelve_data", "alpha_vantage", "yahoo"]
+    },
+    {
+      "asset_type": "commodity_spot",
+      "data_type": "realtime",
+      "exchange": "OTC",
+      "providers": ["twelve_data", "alpha_vantage", "yahoo"]
+    },
+    {
+      "asset_type": "commodity_future",
+      "data_type": "historical",
+      "exchange": "COMEX",
+      "providers": ["yahoo", "twelve_data"]
+    },
+    {
+      "asset_type": "commodity_future",
+      "data_type": "realtime",
+      "exchange": "COMEX",
+      "providers": ["yahoo", "twelve_data"]
+    },
+    {
+      "asset_type": "stock",
+      "data_type": "historical",
+      "exchange": "NASDAQ",
+      "providers": ["yahoo", "twelve_data", "finnhub"]
+    },
+    {
+      "asset_type": "stock",
+      "data_type": "realtime",
+      "exchange": "NASDAQ",
+      "providers": ["yahoo", "twelve_data", "finnhub"]
+    },
+    {
+      "asset_type": "stock",
+      "data_type": "historical",
+      "exchange": "HKEX",
+      "providers": ["yahoo", "twelve_data"]
+    },
+    {
+      "asset_type": "stock",
+      "data_type": "realtime",
+      "exchange": "HKEX",
+      "providers": ["yahoo", "twelve_data"]
+    },
+    {
+      "asset_type": "fx",
+      "data_type": "historical",
+      "exchange": "FOREX",
+      "providers": ["twelve_data", "alpha_vantage"]
+    },
+    {
+      "asset_type": "fx",
+      "data_type": "realtime",
+      "exchange": "FOREX",
+      "providers": ["twelve_data", "alpha_vantage"]
+    },
+    {
+      "asset_type": "crypto",
+      "data_type": "historical",
+      "exchange": "CRYPTO",
+      "providers": ["ccxt", "crypto"]
+    },
+    {
+      "asset_type": "crypto",
+      "data_type": "realtime",
+      "exchange": "CRYPTO",
+      "providers": ["ccxt", "crypto"]
+    }
+  ]
+}

@@ -8,6 +8,9 @@ duplicate registration across FastAPI and FastMCP lifespans.
 from __future__ import annotations
 
 import asyncio
+import json
+import os
+from pathlib import Path
 from typing import Optional
 
 from src.server.core.dependencies import Container
@@ -42,6 +45,7 @@ async def init_adapters() -> None:
             logger.info("✅ PostgreSQL connection established")
             security_master_repo = Container.security_master_repo()
             await security_master_repo.ensure_schema()
+            await _load_alias_seeds(security_master_repo)
         else:
             logger.warning("⚠️ PostgreSQL not available, Security Master will be degraded")
 
@@ -92,6 +96,15 @@ async def init_adapters() -> None:
         adapter_manager.register_adapter(Container.crypto_adapter())
         adapter_manager.register_adapter(Container.ccxt_adapter())
 
+        # 期货数据源（优先于 Yahoo）
+        adapter_manager.register_adapter(Container.futures_adapter())
+
+        # Twelve Data（现货/FX/部分股票）
+        adapter_manager.register_adapter(Container.twelve_data_adapter())
+
+        # 现货贵金属数据源（Alpha Vantage）
+        adapter_manager.register_adapter(Container.alpha_vantage_adapter())
+
         # 美股数据源
         adapter_manager.register_adapter(Container.yahoo_adapter())
         if finnhub_available:
@@ -103,6 +116,37 @@ async def init_adapters() -> None:
         )
 
         _initialized = True
+
+
+async def _load_alias_seeds(security_master_repo) -> None:
+    """Load alias seeds into security master (best-effort)."""
+    try:
+        seed_path = os.getenv(
+            "ALIASES_SEED_PATH",
+            str(Path(__file__).resolve().parents[1] / "config" / "aliases_seed.json"),
+        )
+        if not seed_path or not Path(seed_path).exists():
+            return
+        with open(seed_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            return
+        for item in data:
+            alias = item.get("alias")
+            normalized = item.get("normalized")
+            if not alias or not normalized:
+                continue
+            await security_master_repo.upsert_alias_for_listing(
+                normalized=normalized,
+                alias=alias,
+                asset_type=item.get("asset_type") or "stock",
+                source=item.get("source") or "seed",
+                confidence=item.get("confidence"),
+                locale=item.get("locale"),
+            )
+        logger.info("✅ Alias seeds loaded", count=len(data))
+    except Exception as e:
+        logger.warning("Alias seed load failed", error=str(e))
 
 
 async def shutdown_adapters() -> None:

@@ -42,10 +42,11 @@ def register_asset_tools(mcp: FastMCP):
         """Get detailed asset information.
 
         Args:
-            ticker: Asset ticker. Format: EXCHANGE:SYMBOL
+            ticker: Asset identifier. Prefer EXCHANGE:SYMBOL
                 - A股: SSE:600519 (上交所), SZSE:000001 (深交所)
                 - 美股: NASDAQ:AAPL, NYSE:TSLA
                 - 加密货币: CRYPTO:BTC, CRYPTO:ETH
+              Raw input like “苹果”, “白银期货”, “EURUSD” is also supported.
             ctx: FastMCP Context for logging
 
         Returns:
@@ -108,10 +109,11 @@ def register_asset_tools(mcp: FastMCP):
         """Get real-time price for an asset.
 
         Args:
-            ticker: Asset ticker. Format: EXCHANGE:SYMBOL
+            ticker: Asset identifier. Prefer EXCHANGE:SYMBOL
                 - A股: SSE:600519 (上交所), SZSE:000001 (深交所)
                 - 美股: NASDAQ:AAPL, NYSE:TSLA
                 - 加密货币: CRYPTO:BTC, CRYPTO:ETH
+              Raw input like “苹果”, “白银期货”, “EURUSD” is also supported.
             ctx: FastMCP Context for logging
 
         Returns:

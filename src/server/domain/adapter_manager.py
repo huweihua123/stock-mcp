@@ -103,6 +103,11 @@ class AdapterManager:
             adapter: Data adapter instance to register
         """
         with self.lock:
+            if adapter.source in self.adapters:
+                logger.info(
+                    f"Adapter already registered: {adapter.source.value}, skipping duplicate"
+                )
+                return
             self.adapters[adapter.source] = adapter
             self._adapter_order.append(adapter)
             self._rebuild_routing_table()
@@ -112,6 +117,25 @@ class AdapterManager:
         """Get list of available data adapters."""
         with self.lock:
             return list(self.adapters.keys())
+
+    def get_adapter_by_provider(self, provider: str) -> Optional[BaseDataAdapter]:
+        """Get adapter by provider name (DataSource value)."""
+        if not provider:
+            return None
+        provider_key = provider
+        try:
+            # DataSource enum matches values like \"yahoo\"
+            ds = DataSource(provider_key)
+        except Exception:
+            ds = None
+        with self.lock:
+            if ds and ds in self.adapters:
+                return self.adapters.get(ds)
+            # Fallback: match by value string
+            for key, adapter in self.adapters.items():
+                if key.value == provider_key:
+                    return adapter
+        return None
 
     def get_adapters_for_exchange(self, exchange: str) -> List[BaseDataAdapter]:
         """Get list of adapters for a specific exchange.

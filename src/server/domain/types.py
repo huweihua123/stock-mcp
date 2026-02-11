@@ -18,9 +18,13 @@ class AssetType(str, Enum):
 
     STOCK = "stock"
     CRYPTO = "crypto"
+    CCXT = "ccxt"
     ETF = "etf"
     INDEX = "index"
     FUND = "fund"
+    COMMODITY_SPOT = "commodity_spot"
+    COMMODITY_FUTURE = "commodity_future"
+    FX = "fx"
 
 
 class Exchange(str, Enum):
@@ -34,6 +38,12 @@ class Exchange(str, Enum):
     BSE = "BSE"  # Beijing Stock Exchange
     HKEX = "HKEX"  # Hong Kong Stock Exchange
     CRYPTO = "CRYPTO"
+    COMEX = "COMEX"  # Metals futures
+    NYMEX = "NYMEX"  # Energy futures
+    CME = "CME"
+    ICE = "ICE"
+    FOREX = "FOREX"
+    OTC = "OTC"
 
 
 class MarketStatus(str, Enum):
@@ -57,6 +67,10 @@ class DataSource(str, Enum):
     BAOSTOCK = "baostock"
     CRYPTO = "crypto"
     EDGAR = "edgar"
+    ALPHA_VANTAGE = "alpha_vantage"
+    FUTURES = "futures"
+    TWELVE_DATA = "twelve_data"
+    CCXT = "ccxt"
 
 
 @dataclass

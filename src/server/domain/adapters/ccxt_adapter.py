@@ -27,7 +27,7 @@ class CCXTAdapter(BaseDataAdapter):
     name = "ccxt"
 
     def __init__(self, cache, default_exchange_id: str = "binance"):
-        super().__init__(DataSource.CRYPTO)
+        super().__init__(DataSource.CCXT)
         self.cache = cache
         self.default_exchange_id = default_exchange_id
         self._exchange_instances: Dict[str, ccxt.Exchange] = {}

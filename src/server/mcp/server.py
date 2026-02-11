@@ -44,8 +44,7 @@ async def mcp_lifespan(mcp: FastMCP):
     # Startup
     logger.info("🚀 Starting MCP server")
 
-    await init_adapters()
-
+    # Adapters are initialized by FastAPI app lifespan.
     yield
 
     # Shutdown

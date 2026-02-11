@@ -20,6 +20,9 @@ from src.server.domain.adapters.tushare_adapter import TushareAdapter
 from src.server.domain.adapters.finnhub_adapter import FinnhubAdapter
 from src.server.domain.adapters.baostock_adapter import BaostockAdapter
 from src.server.domain.adapters.ccxt_adapter import CCXTAdapter
+from src.server.domain.adapters.futures_adapter import FuturesAdapter
+from src.server.domain.adapters.alpha_vantage_adapter import AlphaVantageAdapter
+from src.server.domain.adapters.twelve_data_adapter import TwelveDataAdapter
 
 # Services
 from src.server.domain.services.fundamental_service import FundamentalService
@@ -98,6 +101,44 @@ class Container(containers.DeclarativeContainer):
         FinnhubAdapter, finnhub_conn=finnhub, cache=cache
     )
     baostock_adapter = providers.Singleton(BaostockAdapter, cache=cache)
+    futures_adapter = providers.Singleton(
+        FuturesAdapter,
+        cache=cache,
+        proxy_url=providers.Callable(
+            lambda cfg: (
+                f"http://{cfg.proxy.host}:{cfg.proxy.port}"
+                if cfg.proxy.enabled
+                else None
+            ),
+            config,
+        ),
+    )
+    alpha_vantage_adapter = providers.Singleton(
+        AlphaVantageAdapter,
+        api_key=providers.Callable(lambda cfg: cfg.api_keys.alpha_vantage or "", config),
+        cache=cache,
+        proxy_url=providers.Callable(
+            lambda cfg: (
+                f"http://{cfg.proxy.host}:{cfg.proxy.port}"
+                if cfg.proxy.enabled
+                else None
+            ),
+            config,
+        ),
+    )
+    twelve_data_adapter = providers.Singleton(
+        TwelveDataAdapter,
+        api_key=providers.Callable(lambda cfg: cfg.api_keys.twelve_data or "", config),
+        cache=cache,
+        proxy_url=providers.Callable(
+            lambda cfg: (
+                f"http://{cfg.proxy.host}:{cfg.proxy.port}"
+                if cfg.proxy.enabled
+                else None
+            ),
+            config,
+        ),
+    )
 
     from src.server.domain.adapters.edgar_adapter import EdgarAdapter
 
@@ -116,16 +157,27 @@ class Container(containers.DeclarativeContainer):
     # Symbol resolver & gateway
     from src.server.domain.symbols import SymbolResolver
     from src.server.domain.market_gateway import MarketGateway
+    from src.server.domain.routing import MarketRouter, ProviderHealthTracker, RoutingPolicy
 
     symbol_resolver = providers.Singleton(
         SymbolResolver,
         security_master_repo=security_master_repo,
         adapter_manager=adapter_manager,
     )
+    routing_policy = providers.Singleton(RoutingPolicy.load)
+    provider_health = providers.Singleton(ProviderHealthTracker)
+    market_router = providers.Singleton(
+        MarketRouter,
+        adapter_manager=adapter_manager,
+        security_master_repo=security_master_repo,
+        routing_policy=routing_policy,
+        health_tracker=provider_health,
+    )
     market_gateway = providers.Singleton(
         MarketGateway,
         adapter_manager=adapter_manager,
         symbol_resolver=symbol_resolver,
+        market_router=market_router,
     )
 
     # MinIO Client

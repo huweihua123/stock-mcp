@@ -7,14 +7,15 @@ import asyncio
 from typing import Any, Dict, List, Optional
 
 from src.server.domain.symbols.errors import SymbolResolutionError
-from src.server.domain.symbols.types import ResolutionStatus
+from src.server.domain.symbols.types import InstrumentRef, ResolutionStatus
 from src.server.utils.logger import logger
 
 
 class MarketGateway:
-    def __init__(self, adapter_manager, symbol_resolver):
+    def __init__(self, adapter_manager, symbol_resolver, market_router=None):
         self._adapter_manager = adapter_manager
         self._resolver = symbol_resolver
+        self._router = market_router
 
     @property
     def adapters(self):
@@ -44,19 +45,85 @@ class MarketGateway:
             raw=raw_symbol,
         )
 
+    async def resolve_instrument(self, raw_symbol: str):
+        resolution = await self._resolver.resolve(raw_symbol)
+        if resolution.status == ResolutionStatus.RESOLVED and resolution.instrument:
+            return resolution.instrument
+        if resolution.status == ResolutionStatus.RESOLVED and resolution.normalized:
+            exchange, symbol = resolution.normalized.split(":", 1)
+            return resolution.instrument or InstrumentRef(
+                canonical_id=f"stock|{exchange}|{symbol}",
+                normalized=resolution.normalized,
+                asset_type=resolution.asset_type or "stock",
+                exchange=exchange,
+                raw_input=raw_symbol,
+            )
+        if resolution.status == ResolutionStatus.AMBIGUOUS:
+            raise SymbolResolutionError(
+                code="SYMBOL_AMBIGUOUS",
+                message="symbol is ambiguous; specify exchange",
+                raw=raw_symbol,
+                candidates=[c.ticker for c in resolution.candidates],
+            )
+        if resolution.status == ResolutionStatus.NOT_FOUND:
+            raise SymbolResolutionError(
+                code="SYMBOL_NOT_FOUND",
+                message="symbol not found",
+                raw=raw_symbol,
+            )
+        raise SymbolResolutionError(
+            code="SYMBOL_INVALID",
+            message=resolution.reason or "invalid symbol",
+            raw=raw_symbol,
+        )
+
     async def get_real_time_price(self, raw_symbol: str):
-        ticker = await self.resolve_ticker(raw_symbol)
+        instrument = await self.resolve_instrument(raw_symbol)
+        if self._router and hasattr(instrument, "normalized"):
+            return await self._router.get_real_time_price(instrument)
+        ticker = (
+            instrument.normalized
+            if hasattr(instrument, "normalized")
+            else await self.resolve_ticker(raw_symbol)
+        )
         return await self._adapter_manager.get_real_time_price(ticker)
 
     async def get_asset_info(self, raw_symbol: str):
         ticker = await self.resolve_ticker(raw_symbol)
         return await self._adapter_manager.get_asset_info(ticker)
 
-    async def get_historical_prices(self, raw_symbol: str, start_date, end_date, interval: str = "1d"):
-        ticker = await self.resolve_ticker(raw_symbol)
-        return await self._adapter_manager.get_historical_prices(ticker, start_date, end_date, interval)
+    async def get_historical_prices(
+        self, raw_symbol: str, start_date, end_date, interval: str = "1d"
+    ):
+        instrument = await self.resolve_instrument(raw_symbol)
+        if self._router and hasattr(instrument, "normalized"):
+            return await self._router.get_historical_prices(
+                instrument, start_date, end_date, interval
+            )
+        ticker = (
+            instrument.normalized
+            if hasattr(instrument, "normalized")
+            else await self.resolve_ticker(raw_symbol)
+        )
+        return await self._adapter_manager.get_historical_prices(
+            ticker, start_date, end_date, interval
+        )
 
     async def get_multiple_prices(self, raw_symbols: List[str]) -> Dict[str, Any]:
+        if self._router:
+            results: Dict[str, Any] = {}
+            for raw in raw_symbols:
+                try:
+                    instrument = await self.resolve_instrument(raw)
+                    price = await self._router.get_real_time_price(instrument)
+                    results[raw] = (
+                        price.to_dict() if price and hasattr(price, "to_dict") else price
+                    )
+                except SymbolResolutionError as e:
+                    results[raw] = {"error": e.to_dict()}
+            return results
+
+        # Legacy batch path
         resolutions = await asyncio.gather(
             *[self._resolver.resolve(sym) for sym in raw_symbols],
             return_exceptions=True,
@@ -66,7 +133,9 @@ class MarketGateway:
 
         for raw, res in zip(raw_symbols, resolutions):
             if isinstance(res, Exception):
-                errors[raw] = {"error": {"code": "RESOLVE_FAILED", "message": str(res), "raw": raw}}
+                errors[raw] = {
+                    "error": {"code": "RESOLVE_FAILED", "message": str(res), "raw": raw}
+                }
                 continue
             if res.status == ResolutionStatus.RESOLVED and res.normalized:
                 resolved_map[raw] = res.normalized
@@ -80,11 +149,22 @@ class MarketGateway:
                     }
                 }
             elif res.status == ResolutionStatus.NOT_FOUND:
-                errors[raw] = {"error": {"code": "SYMBOL_NOT_FOUND", "message": "symbol not found", "raw": raw}}
+                errors[raw] = {
+                    "error": {
+                        "code": "SYMBOL_NOT_FOUND",
+                        "message": "symbol not found",
+                        "raw": raw,
+                    }
+                }
             else:
-                errors[raw] = {"error": {"code": "SYMBOL_INVALID", "message": res.reason or "invalid symbol", "raw": raw}}
+                errors[raw] = {
+                    "error": {
+                        "code": "SYMBOL_INVALID",
+                        "message": res.reason or "invalid symbol",
+                        "raw": raw,
+                    }
+                }
 
-        # Batch fetch for resolved tickers
         resolved_tickers = [t for t in resolved_map.values() if t]
         results: Dict[str, Any] = {}
         if resolved_tickers:
@@ -98,11 +178,9 @@ class MarketGateway:
                 else:
                     results[raw] = None
 
-        # merge errors and unresolved
         for raw, err in errors.items():
             results[raw] = err
 
-        # ensure all raw symbols present
         for raw in raw_symbols:
             results.setdefault(raw, None)
 
@@ -180,16 +258,26 @@ class MarketGateway:
 
     async def get_technical_indicators(
         self,
-        raw_symbol: str,
-        indicators: List[str],
-        period: str,
-        start_date,
-        end_date,
+        raw_symbol: str | None = None,
+        indicators: List[str] | None = None,
+        period: str = "daily",
+        start_date=None,
+        end_date=None,
+        *,
+        ticker: str | None = None,
     ) -> Dict[str, Any]:
-        ticker = await self.resolve_ticker(raw_symbol)
+        if ticker:
+            if ":" in ticker:
+                resolved = ticker
+            else:
+                resolved = await self.resolve_ticker(ticker)
+        else:
+            if not raw_symbol:
+                raise ValueError("raw_symbol or ticker is required")
+            resolved = await self.resolve_ticker(raw_symbol)
         return await self._adapter_manager.get_technical_indicators(
-            ticker=ticker,
-            indicators=indicators,
+            ticker=resolved,
+            indicators=indicators or [],
             period=period,
             start_date=start_date,
             end_date=end_date,

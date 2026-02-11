@@ -67,6 +67,7 @@ class APIKeysConfig(BaseAppSettings):
 
     finnhub: Optional[str] = Field(None, validation_alias="FINNHUB_API_KEY")
     alpha_vantage: Optional[str] = Field(None, validation_alias="ALPHA_VANTAGE_API_KEY")
+    twelve_data: Optional[str] = Field(None, validation_alias="TWELVE_DATA_API_KEY")
     news_api: Optional[str] = Field(None, validation_alias="NEWS_API_KEY")
     tavily: Optional[str] = Field(None, validation_alias="TAVILY_API_KEY")
     google: Optional[str] = Field(None, validation_alias="GOOGLE_API_KEY")

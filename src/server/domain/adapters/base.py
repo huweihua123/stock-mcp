@@ -70,6 +70,17 @@ class BaseDataAdapter(abc.ABC):
         """
         pass
 
+    async def get_real_time_price_by_provider_symbol(
+        self, provider_symbol: str, internal_ticker: Optional[str] = None
+    ) -> Optional[AssetPrice]:
+        """Fetch current price using provider-specific symbol if supported.
+
+        Default behavior uses internal ticker when provided.
+        """
+        if internal_ticker:
+            return await self.get_real_time_price(internal_ticker)
+        return await self.get_real_time_price(provider_symbol)
+
     async def get_multiple_prices(
         self, tickers: List[str]
     ) -> Dict[str, Optional[AssetPrice]]:
@@ -113,6 +124,26 @@ class BaseDataAdapter(abc.ABC):
             List of historical price data
         """
         pass
+
+    async def get_historical_prices_by_provider_symbol(
+        self,
+        provider_symbol: str,
+        start_date: datetime,
+        end_date: datetime,
+        interval: str = "1d",
+        internal_ticker: Optional[str] = None,
+    ) -> List[AssetPrice]:
+        """Fetch historical price data using provider-specific symbol if supported.
+
+        Default behavior uses internal ticker when provided.
+        """
+        if internal_ticker:
+            return await self.get_historical_prices(
+                internal_ticker, start_date, end_date, interval
+            )
+        return await self.get_historical_prices(
+            provider_symbol, start_date, end_date, interval
+        )
 
     async def get_filings(
         self,
