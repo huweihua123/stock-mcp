@@ -124,6 +124,13 @@ class Settings(BaseAppSettings):
     api_keys: APIKeysConfig = Field(default_factory=APIKeysConfig)
     proxy: ProxyConfig = Field(default_factory=ProxyConfig)
     postgres: PostgresConfig = Field(default_factory=PostgresConfig)
+    security_master_backend: str = Field(
+        default="auto", validation_alias="SECURITY_MASTER_BACKEND"
+    )
+    security_master_sqlite_path: str = Field(
+        default="data/security_master.sqlite",
+        validation_alias="SECURITY_MASTER_SQLITE_PATH",
+    )
 
     # Other optional configs
     cors_origins: str = Field(default="*", validation_alias="CORS_ORIGINS")

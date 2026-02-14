@@ -526,7 +526,7 @@ def register_money_flow_tools(mcp: FastMCP):
             result = await money_flow_use_cases.get_interest_rates()
             result["component_type"] = "interest_rates"
 
-            summary_text = "中国利率：SHIBOR 期限结构 + LPR"
+            summary_text = "中国利率：SHIBOR 期限结构 + LPR（shibor_lpr）"
 
             shibor = result.get("data", {}).get("shibor", []) or []
             lpr = result.get("data", {}).get("lpr", []) or []
@@ -574,7 +574,7 @@ def register_money_flow_tools(mcp: FastMCP):
                     component_type="interest_rates_lpr",
                     name="LPR Interest Rates",
                     content=lpr_content,
-                    description="China Loan Prime Rate (LPR): 1-Year and 5-Year Benchmark Lending Rates - Last 5 Years",
+                    description="China Loan Prime Rate (LPR, shibor_lpr): 1-Year and 5-Year Benchmark Lending Rates - Last 5 Years",
                     metadata={"type": "interest_rates_lpr"},
                 ),
             ]

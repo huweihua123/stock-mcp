@@ -816,7 +816,8 @@ class TushareAdapter(BaseDataAdapter):
             return cached
 
         try:
-            df = await self._run(client.cn_sf, start_m=start_m, end_m=end_m)
+            # Tushare 社融（月度）接口为 sf_month
+            df = await self._run(client.sf_month, start_m=start_m, end_m=end_m)
             data = []
             if df is not None and not df.empty:
                 data = df.where(df.notnull(), None).to_dict("records")
@@ -828,7 +829,7 @@ class TushareAdapter(BaseDataAdapter):
             await self.cache.set(cache_key, result, ttl=3600)
             return result
         except Exception as e:
-            self.logger.error(f"Failed to get social financing: {e}")
+            self.logger.error(f"Failed to get social financing: {e}", exc_info=True)
             raise ValueError(f"Failed to get social financing: {e}")
 
     async def get_interest_rates(self) -> Dict[str, Any]:
@@ -844,27 +845,47 @@ class TushareAdapter(BaseDataAdapter):
         if cached:
             return cached
 
+        errors: List[str] = []
+        shibor_df = None
+        lpr_df = None
+
         try:
             shibor_df = await self._run(
                 client.shibor,
                 start_date=(datetime.now() - timedelta(days=370)).strftime("%Y%m%d"),
                 end_date=datetime.now().strftime("%Y%m%d"),
             )
-            lpr_df = await self._run(client.lpr, start_m=start_m, end_m=end_m)
-
-            result = {
-                "component_type": "interest_rates",
-                "source": "tushare",
-                "data": {
-                    "shibor": shibor_df.where(shibor_df.notnull(), None).to_dict("records") if shibor_df is not None else [],
-                    "lpr": lpr_df.where(lpr_df.notnull(), None).to_dict("records") if lpr_df is not None else [],
-                },
-            }
-            await self.cache.set(cache_key, result, ttl=3600)
-            return result
         except Exception as e:
-            self.logger.error(f"Failed to get interest rates: {e}")
-            raise ValueError(f"Failed to get interest rates: {e}")
+            errors.append(f"shibor: {e}")
+            self.logger.error(f"Failed to get SHIBOR: {e}")
+
+        # LPR 官方接口为 shibor_lpr，使用 start_date/end_date 参数
+        try:
+            lpr_df = await self._run(
+                client.shibor_lpr,
+                start_date=(datetime.now() - timedelta(days=5 * 365)).strftime("%Y%m%d"),
+                end_date=datetime.now().strftime("%Y%m%d"),
+            )
+        except Exception as e:
+            errors.append(f"shibor_lpr: {e}")
+            self.logger.error(f"Failed to get LPR (shibor_lpr): {e}")
+
+        if shibor_df is None and lpr_df is None:
+            raise ValueError(f"Failed to get interest rates: {', '.join(errors) or 'unknown error'}")
+
+        result = {
+            "component_type": "interest_rates",
+            "source": "tushare",
+            "data": {
+                "shibor": shibor_df.where(shibor_df.notnull(), None).to_dict("records") if shibor_df is not None else [],
+                "lpr": lpr_df.where(lpr_df.notnull(), None).to_dict("records") if lpr_df is not None else [],
+            },
+        }
+        if errors:
+            result["errors"] = errors
+
+        await self.cache.set(cache_key, result, ttl=3600)
+        return result
 
     async def get_market_liquidity(self, days: int = 60) -> Dict[str, Any]:
         """获取市场流动性数据 (北向资金 + 融资融券)."""

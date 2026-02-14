@@ -38,16 +38,17 @@ async def init_adapters() -> None:
         await redis.connect()
         logger.info("✅ Redis connection established")
 
-        # Initialize PostgreSQL (Security Master)
+        # Initialize PostgreSQL (Security Master) with adaptive fallback
         postgres = Container.postgres()
         postgres_ok = await postgres.connect()
         if postgres_ok:
             logger.info("✅ PostgreSQL connection established")
-            security_master_repo = Container.security_master_repo()
-            await security_master_repo.ensure_schema()
-            await _load_alias_seeds(security_master_repo)
         else:
-            logger.warning("⚠️ PostgreSQL not available, Security Master will be degraded")
+            logger.warning("⚠️ PostgreSQL not available, will use fallback storage")
+
+        security_master_repo = Container.security_master_repo()
+        await security_master_repo.ensure_schema()
+        await _load_alias_seeds(security_master_repo)
 
         config = Container.config()
 

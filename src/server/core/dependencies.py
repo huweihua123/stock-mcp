@@ -152,7 +152,12 @@ class Container(containers.DeclarativeContainer):
     # Security Master
     from src.server.domain.security_master import SecurityMasterRepository
 
-    security_master_repo = providers.Singleton(SecurityMasterRepository, postgres_conn=postgres)
+    security_master_repo = providers.Singleton(
+        SecurityMasterRepository,
+        postgres_conn=postgres,
+        backend_mode=providers.Callable(lambda cfg: cfg.security_master_backend, config),
+        sqlite_path=providers.Callable(lambda cfg: cfg.security_master_sqlite_path, config),
+    )
 
     # Symbol resolver & gateway
     from src.server.domain.symbols import SymbolResolver

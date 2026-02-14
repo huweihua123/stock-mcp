@@ -444,8 +444,10 @@ class SymbolResolver:
     def _normalize_exchange(self, exchange: str) -> str:
         mapping = {
             "SH": "SSE",
+            "SHSE": "SSE",
             "SS": "SSE",
             "SZ": "SZSE",
+            "SZSE": "SZSE",
             "BJ": "BSE",
             "HK": "HKEX",
         }

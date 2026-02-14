@@ -9,8 +9,10 @@ from src.server.utils.logger import logger
 
 _EXCHANGE_ALIASES = {
     "SH": "SSE",
+    "SHSE": "SSE",
     "SS": "SSE",
     "SZ": "SZSE",
+    "SZSE": "SZSE",
     "BJ": "BSE",
     "HK": "HKEX",
     "US": "NASDAQ",
