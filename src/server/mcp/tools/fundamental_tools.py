@@ -215,10 +215,34 @@ def register_fundamental_tools(mcp: FastMCP):
                     extra={"ts_code": ts_code}
                 )
 
-            return create_artifact_list_response(
-                summary=summary_text,
-                artifacts=artifacts
+            response: Dict[str, Any] = {
+                **create_artifact_list_response(
+                    summary=summary_text,
+                    artifacts=artifacts
+                )
+            }
+            response["tool_scope"] = (
+                "This tool provides revenue/net-income trend charts only, not a full fundamental report."
             )
+            response["coverage"] = {
+                "provided": [
+                    "revenue_trend",
+                    "net_income_trend",
+                ],
+                "missing": [
+                    "main_business_structure",
+                    "shareholder_structure",
+                    "dividend_history",
+                    "valuation_metrics",
+                    "profitability_ratios",
+                ],
+            }
+            response["next_recommended_tools"] = [
+                "get_mainbz_info",
+                "get_shareholder_info",
+                "get_dividend_info",
+            ]
+            return response
             
         except SymbolResolutionError as e:
             if ctx:
@@ -237,7 +261,10 @@ def register_fundamental_tools(mcp: FastMCP):
 
     @mcp.tool(tags={"fundamental"})
     async def get_financial_reports(symbol: str, ctx: Context = None) -> Dict[str, Any]:
-        """Get financial reports for the given ticker.
+        """Get revenue/net-income trend charts for the given ticker.
+
+        This tool is intentionally narrow: it focuses on trend charts and does
+        not represent a complete fundamental analysis package.
 
         Args:
             symbol: Asset ticker. Format: EXCHANGE:SYMBOL
@@ -245,7 +272,10 @@ def register_fundamental_tools(mcp: FastMCP):
                 - 美股: NASDAQ:AAPL, NYSE:TSLA
 
         Returns:
-            ArtifactEnvelope containing financial analysis
+            Artifact list response with:
+            - summary + artifacts (trend charts)
+            - coverage (provided/missing dimensions)
+            - next_recommended_tools for follow-up
         """
         return await _get_financial_reports_impl(symbol, ctx)
 
