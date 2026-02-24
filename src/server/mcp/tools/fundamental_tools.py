@@ -27,7 +27,9 @@ def register_fundamental_tools(mcp: FastMCP):
         resolved = await Container.market_gateway().resolve_ticker(raw_symbol)
         return to_ts_code(resolved)
 
-    async def _get_financial_reports_impl(symbol: str, ctx: Context = None) -> Dict[str, Any]:
+    async def _get_financial_reports_impl(
+        symbol: str, ctx: Context = None
+    ) -> Dict[str, Any]:
         """Implementation of get_financial_reports logic."""
         if ctx:
             await ctx.info(f"🔧 获取财务报告: {symbol}", extra={"symbol": symbol})
@@ -66,10 +68,7 @@ def register_fundamental_tools(mcp: FastMCP):
                 if not isinstance(value, str):
                     value = str(value)
                 cleaned = (
-                    value.strip()
-                    .replace("-", "")
-                    .replace("/", "")
-                    .replace(".", "")
+                    value.strip().replace("-", "").replace("/", "").replace(".", "")
                 )
                 return cleaned if len(cleaned) >= 8 and cleaned[:8].isdigit() else None
 
@@ -88,10 +87,18 @@ def register_fundamental_tools(mcp: FastMCP):
                         ],
                     )
                 )
-                revenue = _first_value(row, ["revenue", "营业收入", "营业总收入", "主营业务收入"])
+                revenue = _first_value(
+                    row, ["revenue", "营业收入", "营业总收入", "主营业务收入"]
+                )
                 net_income = _first_value(
                     row,
-                    ["n_income_attr_p", "归母净利润", "归属于母公司所有者的净利润", "净利润", "n_income"],
+                    [
+                        "n_income_attr_p",
+                        "归母净利润",
+                        "归属于母公司所有者的净利润",
+                        "净利润",
+                        "n_income",
+                    ],
                 )
                 return {
                     "end_date": end_date,
@@ -144,26 +151,32 @@ def register_fundamental_tools(mcp: FastMCP):
                         bars["Q3"] = q3 - (q1 or 0) - (bars.get("Q2") or 0)
                     if q4 is not None:
                         q1v = q1 or 0
-                        q2v = bars.get("Q2") or (q2 - q1 if q2 is not None and q1 is not None else 0)
+                        q2v = bars.get("Q2") or (
+                            q2 - q1 if q2 is not None and q1 is not None else 0
+                        )
                         q3v = bars.get("Q3") or 0
                         bars["Q4"] = q4 - q1v - q2v - q3v
                 data = []
                 for year in sorted(yearly.keys()):
                     bars = yearly[year]
-                    data.append({
-                        "category": year,
-                        "bars": {
-                            "Q1": bars.get("Q1"),
-                            "Q2": bars.get("Q2"),
-                            "Q3": bars.get("Q3"),
-                            "Q4": bars.get("Q4"),
-                        },
-                    })
+                    data.append(
+                        {
+                            "category": year,
+                            "bars": {
+                                "Q1": bars.get("Q1"),
+                                "Q2": bars.get("Q2"),
+                                "Q3": bars.get("Q3"),
+                                "Q4": bars.get("Q4"),
+                            },
+                        }
+                    )
                 # compute YoY based on annual total
                 prev_total = None
                 for item in data:
                     bars = item["bars"]
-                    total = sum([v for v in bars.values() if isinstance(v, (int, float))])
+                    total = sum(
+                        [v for v in bars.values() if isinstance(v, (int, float))]
+                    )
                     if prev_total and prev_total != 0:
                         item["line"] = (total / prev_total) - 1
                     else:
@@ -174,7 +187,11 @@ def register_fundamental_tools(mcp: FastMCP):
             revenue_data = _build_quarter_bars(income_sorted, "revenue")
             net_income_data = _build_quarter_bars(
                 [
-                    {**row, "n_income_attr_p": row.get("n_income_attr_p") or row.get("n_income")}
+                    {
+                        **row,
+                        "n_income_attr_p": row.get("n_income_attr_p")
+                        or row.get("n_income"),
+                    }
                     for row in income_sorted
                 ],
                 "n_income_attr_p",
@@ -191,7 +208,11 @@ def register_fundamental_tools(mcp: FastMCP):
                         "data": revenue_data,
                     },
                     description=f"Revenue quarterly breakdown chart for {ts_code}",
-                    metadata={"type": "financial_chart", "ts_code": ts_code, "chart_type": "revenue"},
+                    metadata={
+                        "type": "financial_chart",
+                        "ts_code": ts_code,
+                        "chart_type": "revenue",
+                    },
                 ),
                 create_artifact_envelope(
                     component_type="financial_chart",
@@ -203,22 +224,24 @@ def register_fundamental_tools(mcp: FastMCP):
                         "data": net_income_data,
                     },
                     description=f"Net income quarterly breakdown chart for {ts_code}",
-                    metadata={"type": "financial_chart", "ts_code": ts_code, "chart_type": "net_income"},
+                    metadata={
+                        "type": "financial_chart",
+                        "ts_code": ts_code,
+                        "chart_type": "net_income",
+                    },
                 ),
             ]
 
             summary_text = f"{ts_code} 财务图表：季度营收分解 + 季度净利润分解"
-            
+
             if ctx:
                 await ctx.info(
-                    f"✅ 财务报告获取完成: {ts_code}",
-                    extra={"ts_code": ts_code}
+                    f"✅ 财务报告获取完成: {ts_code}", extra={"ts_code": ts_code}
                 )
 
             response: Dict[str, Any] = {
                 **create_artifact_list_response(
-                    summary=summary_text,
-                    artifacts=artifacts
+                    summary=summary_text, artifacts=artifacts
                 )
             }
             response["tool_scope"] = (
@@ -243,7 +266,7 @@ def register_fundamental_tools(mcp: FastMCP):
                 "get_dividend_info",
             ]
             return response
-            
+
         except SymbolResolutionError as e:
             if ctx:
                 await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
@@ -254,8 +277,7 @@ def register_fundamental_tools(mcp: FastMCP):
             logger.error(f"Get financial report failed: {e}")
             if ctx:
                 await ctx.error(
-                    f"❌ 获取财务报告失败: {symbol}",
-                    extra={"error": str(e)}
+                    f"❌ 获取财务报告失败: {symbol}", extra={"error": str(e)}
                 )
             return {"error": str(e)}
 
@@ -291,7 +313,9 @@ def register_fundamental_tools(mcp: FastMCP):
 
         raw_symbol = ts_code or symbol
         if ctx:
-            await ctx.info(f"🔧 获取主营业务构成: {raw_symbol}", extra={"symbol": raw_symbol})
+            await ctx.info(
+                f"🔧 获取主营业务构成: {raw_symbol}", extra={"symbol": raw_symbol}
+            )
 
         try:
             logger.info("MCP tool called: get_mainbz_info", symbol=raw_symbol)
@@ -321,7 +345,12 @@ def register_fundamental_tools(mcp: FastMCP):
                         {"name": r.get("bz_item"), "value": r.get("bz_sales")}
                     )
 
-                periods = [{"date": d, "data": v} for d, v in sorted(periods_map.items(), key=lambda x: x[0], reverse=True)]
+                periods = [
+                    {"date": d, "data": v}
+                    for d, v in sorted(
+                        periods_map.items(), key=lambda x: x[0], reverse=True
+                    )
+                ]
                 default_date = periods[0]["date"] if periods else ""
 
                 artifacts.append(
@@ -354,13 +383,11 @@ def register_fundamental_tools(mcp: FastMCP):
 
             if ctx:
                 await ctx.info(
-                    f"✅ 主营业务构成获取完成: {ts_code}",
-                    extra={"rows": len(rows)}
+                    f"✅ 主营业务构成获取完成: {ts_code}", extra={"rows": len(rows)}
                 )
 
             return create_artifact_list_response(
-                summary=summary_text,
-                artifacts=artifacts
+                summary=summary_text, artifacts=artifacts
             )
 
         except SymbolResolutionError as e:
@@ -373,8 +400,7 @@ def register_fundamental_tools(mcp: FastMCP):
             logger.error(f"Get main business info failed: {e}")
             if ctx:
                 await ctx.error(
-                    f"❌ 获取主营业务构成失败: {symbol}",
-                    extra={"error": str(e)}
+                    f"❌ 获取主营业务构成失败: {symbol}", extra={"error": str(e)}
                 )
             return {"error": str(e)}
 
@@ -389,7 +415,9 @@ def register_fundamental_tools(mcp: FastMCP):
             return {"error": "symbol or ts_code is required"}
         raw_symbol = ts_code or symbol
         if ctx:
-            await ctx.info(f"🔧 获取股东信息: {raw_symbol}", extra={"symbol": raw_symbol})
+            await ctx.info(
+                f"🔧 获取股东信息: {raw_symbol}", extra={"symbol": raw_symbol}
+            )
 
         try:
             logger.info("MCP tool called: get_shareholder_info", symbol=raw_symbol)
@@ -398,13 +426,17 @@ def register_fundamental_tools(mcp: FastMCP):
             holder_data = data.get("data", {})
             ts_code = data.get("ts_code") or await _resolve_ts_code(raw_symbol)
 
-            def _latest_by_date(rows: list[dict], date_key: str) -> tuple[str, list[dict]]:
+            def _latest_by_date(
+                rows: list[dict], date_key: str
+            ) -> tuple[str, list[dict]]:
                 if not rows:
                     return "", []
+
                 # normalize date to sortable string
                 def _date_val(r):
                     v = r.get(date_key) or ""
                     return str(v)
+
                 latest = max(rows, key=_date_val).get(date_key) or ""
                 latest_rows = [r for r in rows if r.get(date_key) == latest]
                 return str(latest), latest_rows
@@ -434,13 +466,15 @@ def register_fundamental_tools(mcp: FastMCP):
                 latest_date, rows = _latest_by_date(top10, "end_date")
                 mapped = []
                 for r in rows:
-                    mapped.append({
-                        "holder_name": r.get("holder_name"),
-                        "hold_amount": r.get("hold_amount"),
-                        "hold_ratio": _fmt_pct(r.get("hold_ratio")),
-                        "end_date": _parse_date(r.get("end_date")),
-                        "ann_date": _parse_date(r.get("ann_date")),
-                    })
+                    mapped.append(
+                        {
+                            "holder_name": r.get("holder_name"),
+                            "hold_amount": r.get("hold_amount"),
+                            "hold_ratio": _fmt_pct(r.get("hold_ratio")),
+                            "end_date": _parse_date(r.get("end_date")),
+                            "ann_date": _parse_date(r.get("ann_date")),
+                        }
+                    )
                 artifacts.append(
                     create_artifact_envelope(
                         component_type="table",
@@ -451,15 +485,28 @@ def register_fundamental_tools(mcp: FastMCP):
                             "date": _parse_date(latest_date),
                             "columns": [
                                 {"key": "holder_name", "label": "股东名称"},
-                                {"key": "hold_amount", "label": "持股数量", "align": "right", "value_meta": {"type": "compact"}},
-                                {"key": "hold_ratio", "label": "持股比例", "align": "right"},
+                                {
+                                    "key": "hold_amount",
+                                    "label": "持股数量",
+                                    "align": "right",
+                                    "value_meta": {"type": "compact"},
+                                },
+                                {
+                                    "key": "hold_ratio",
+                                    "label": "持股比例",
+                                    "align": "right",
+                                },
                                 {"key": "end_date", "label": "报告期"},
                                 {"key": "ann_date", "label": "公告期"},
                             ],
                             "rows": mapped,
                         },
                         description=f"Top 10 shareholders for {ts_code}",
-                        metadata={"type": "table", "ts_code": ts_code, "dataset": "top10_holders"},
+                        metadata={
+                            "type": "table",
+                            "ts_code": ts_code,
+                            "dataset": "top10_holders",
+                        },
                         visible_to_llm=False,
                         display_in_report=True,
                     )
@@ -470,13 +517,17 @@ def register_fundamental_tools(mcp: FastMCP):
                 latest_date, rows = _latest_by_date(float10, "end_date")
                 mapped = []
                 for r in rows:
-                    mapped.append({
-                        "holder_name": r.get("holder_name"),
-                        "hold_amount": r.get("hold_amount"),
-                        "hold_float_ratio": _fmt_pct(r.get("hold_float_ratio") or r.get("hold_ratio")),
-                        "end_date": _parse_date(r.get("end_date")),
-                        "ann_date": _parse_date(r.get("ann_date")),
-                    })
+                    mapped.append(
+                        {
+                            "holder_name": r.get("holder_name"),
+                            "hold_amount": r.get("hold_amount"),
+                            "hold_float_ratio": _fmt_pct(
+                                r.get("hold_float_ratio") or r.get("hold_ratio")
+                            ),
+                            "end_date": _parse_date(r.get("end_date")),
+                            "ann_date": _parse_date(r.get("ann_date")),
+                        }
+                    )
                 artifacts.append(
                     create_artifact_envelope(
                         component_type="table",
@@ -487,15 +538,28 @@ def register_fundamental_tools(mcp: FastMCP):
                             "date": _parse_date(latest_date),
                             "columns": [
                                 {"key": "holder_name", "label": "股东名称"},
-                                {"key": "hold_amount", "label": "持股数量", "align": "right", "value_meta": {"type": "compact"}},
-                                {"key": "hold_float_ratio", "label": "占流通股本比例", "align": "right"},
+                                {
+                                    "key": "hold_amount",
+                                    "label": "持股数量",
+                                    "align": "right",
+                                    "value_meta": {"type": "compact"},
+                                },
+                                {
+                                    "key": "hold_float_ratio",
+                                    "label": "占流通股本比例",
+                                    "align": "right",
+                                },
                                 {"key": "end_date", "label": "报告期"},
                                 {"key": "ann_date", "label": "公告期"},
                             ],
                             "rows": mapped,
                         },
                         description=f"Top 10 tradable shareholders for {ts_code}",
-                        metadata={"type": "table", "ts_code": ts_code, "dataset": "top10_floatholders"},
+                        metadata={
+                            "type": "table",
+                            "ts_code": ts_code,
+                            "dataset": "top10_floatholders",
+                        },
                         visible_to_llm=False,
                         display_in_report=True,
                     )
@@ -505,17 +569,25 @@ def register_fundamental_tools(mcp: FastMCP):
             if holder_num:
                 trend = []
                 for r in holder_num:
-                    trend.append({
-                        "end_date": _parse_date(r.get("end_date") or r.get("ann_date")),
-                        "holder_num": r.get("holder_num"),
-                    })
+                    trend.append(
+                        {
+                            "end_date": _parse_date(
+                                r.get("end_date") or r.get("ann_date")
+                            ),
+                            "holder_num": r.get("holder_num"),
+                        }
+                    )
                 artifacts.append(
                     create_artifact_envelope(
                         component_type="holder_number_trend",
                         name=f"股东户数变化趋势: {ts_code}",
                         content={"ts_code": ts_code, "holder_number_trend": trend},
                         description=f"Shareholder count trend chart (3 years) for {ts_code}",
-                        metadata={"type": "holder_number_trend", "ts_code": ts_code, "dataset": "holder_number_trend"},
+                        metadata={
+                            "type": "holder_number_trend",
+                            "ts_code": ts_code,
+                            "dataset": "holder_number_trend",
+                        },
                         visible_to_llm=False,
                         display_in_report=True,
                     )
@@ -525,6 +597,7 @@ def register_fundamental_tools(mcp: FastMCP):
             if holder_trade:
                 # Filter last 1 year by ann_date if available
                 from datetime import datetime, timedelta
+
                 cutoff = datetime.now() - timedelta(days=365)
                 filtered = []
                 for r in holder_trade:
@@ -539,14 +612,16 @@ def register_fundamental_tools(mcp: FastMCP):
                 rows = filtered
                 mapped = []
                 for r in rows:
-                    mapped.append({
-                        "holder_name": r.get("holder_name"),
-                        "holder_type": r.get("holder_type"),
-                        "in_de": r.get("in_de"),
-                        "change_vol": r.get("change_vol"),
-                        "avg_price": r.get("avg_price"),
-                        "ann_date": _parse_date(r.get("ann_date")),
-                    })
+                    mapped.append(
+                        {
+                            "holder_name": r.get("holder_name"),
+                            "holder_type": r.get("holder_type"),
+                            "in_de": r.get("in_de"),
+                            "change_vol": r.get("change_vol"),
+                            "avg_price": r.get("avg_price"),
+                            "ann_date": _parse_date(r.get("ann_date")),
+                        }
+                    )
                 artifacts.append(
                     create_artifact_envelope(
                         component_type="table",
@@ -558,14 +633,31 @@ def register_fundamental_tools(mcp: FastMCP):
                                 {"key": "holder_name", "label": "股东名称"},
                                 {"key": "holder_type", "label": "股东类型"},
                                 {"key": "in_de", "label": "增减持"},
-                                {"key": "change_vol", "label": "变动数量", "align": "right", "value_meta": {"type": "compact", "signDisplay": "exceptZero"}},
-                                {"key": "avg_price", "label": "均价", "align": "right", "value_meta": {"type": "number"}},
+                                {
+                                    "key": "change_vol",
+                                    "label": "变动数量",
+                                    "align": "right",
+                                    "value_meta": {
+                                        "type": "compact",
+                                        "signDisplay": "exceptZero",
+                                    },
+                                },
+                                {
+                                    "key": "avg_price",
+                                    "label": "均价",
+                                    "align": "right",
+                                    "value_meta": {"type": "number"},
+                                },
                                 {"key": "ann_date", "label": "公告期"},
                             ],
                             "rows": mapped,
                         },
                         description=f"Shareholder trading records (1 year) for {ts_code}",
-                        metadata={"type": "table", "ts_code": ts_code, "dataset": "holder_trade"},
+                        metadata={
+                            "type": "table",
+                            "ts_code": ts_code,
+                            "dataset": "holder_trade",
+                        },
                         visible_to_llm=False,
                         display_in_report=True,
                     )
@@ -577,8 +669,7 @@ def register_fundamental_tools(mcp: FastMCP):
                 await ctx.info(f"✅ 股东信息获取完成: {ts_code}")
 
             return create_artifact_list_response(
-                summary=summary_text,
-                artifacts=artifacts
+                summary=summary_text, artifacts=artifacts
             )
 
         except SymbolResolutionError as e:
@@ -591,8 +682,7 @@ def register_fundamental_tools(mcp: FastMCP):
             logger.error(f"Get shareholder info failed: {e}")
             if ctx:
                 await ctx.error(
-                    f"❌ 获取股东信息失败: {symbol}",
-                    extra={"error": str(e)}
+                    f"❌ 获取股东信息失败: {symbol}", extra={"error": str(e)}
                 )
             return {"error": str(e)}
 
@@ -656,13 +746,11 @@ def register_fundamental_tools(mcp: FastMCP):
 
             if ctx:
                 await ctx.info(
-                    f"✅ 分红送股信息获取完成: {ts_code}",
-                    extra={"rows": len(rows)}
+                    f"✅ 分红送股信息获取完成: {ts_code}", extra={"rows": len(rows)}
                 )
 
             return create_artifact_response(
-                summary=summary_text,
-                artifact=table_artifact
+                summary=summary_text, artifact=table_artifact
             )
 
         except SymbolResolutionError as e:
@@ -675,7 +763,206 @@ def register_fundamental_tools(mcp: FastMCP):
             logger.error(f"Get dividend info failed: {e}")
             if ctx:
                 await ctx.error(
-                    f"❌ 获取分红送股信息失败: {symbol}",
-                    extra={"error": str(e)}
+                    f"❌ 获取分红送股信息失败: {symbol}", extra={"error": str(e)}
+                )
+            return {"error": str(e)}
+
+    @mcp.tool(tags={"fundamental"})
+    async def get_valuation_metrics(
+        symbol: str, days: int = 250, ctx: Context = None
+    ) -> Dict[str, Any]:
+        """Get valuation metrics with historical percentile ranking.
+
+        Fetches PE/PB/PS and other valuation indicators for the given stock,
+        calculates where the current value sits in its historical range
+        (percentile), and provides an overall valuation level assessment.
+
+        Args:
+            symbol: Asset ticker. Format: EXCHANGE:SYMBOL
+                - A股: SSE:600519 (上交所), SZSE:000001 (深交所)
+            days: Number of trading days for historical percentile
+                  calculation (default 250, ~1 year)
+
+        Returns:
+            Artifact response containing:
+            - Current PE/PB/PS values and their historical percentiles
+            - Historical time series for charting
+            - Valuation level assessment (低估/偏低/适中/偏高/高估)
+        """
+        if ctx:
+            await ctx.info(
+                f"🔧 获取估值指标: {symbol}",
+                extra={"symbol": symbol, "days": days},
+            )
+
+        try:
+            logger.info(
+                "MCP tool called: get_valuation_metrics",
+                symbol=symbol,
+                days=days,
+            )
+
+            data = await fundamental_use_cases.get_valuation_metrics(symbol, days)
+
+            if data.get("error"):
+                return {"error": data["error"]}
+
+            ts_code = data.get("symbol") or await _resolve_ts_code(symbol)
+            metrics = data.get("metrics", {})
+            summary_info = data.get("summary", {})
+            level = summary_info.get("valuation_level", "未知")
+            pe_pct = summary_info.get("pe_ttm_percentile")
+            pb_pct = summary_info.get("pb_percentile")
+
+            # Build summary text for LLM
+            pe_ttm = metrics.get("pe_ttm", {})
+            pb = metrics.get("pb", {})
+            ps_ttm = metrics.get("ps_ttm", {})
+
+            lines = [f"{ts_code} 估值指标 (近{days}个交易日):"]
+            if pe_ttm.get("current") is not None:
+                lines.append(
+                    f"- PE(TTM): {pe_ttm['current']:.2f}" f" (百分位 {pe_pct}%)"
+                    if pe_pct is not None
+                    else f"- PE(TTM): {pe_ttm['current']:.2f}"
+                )
+            if pb.get("current") is not None:
+                lines.append(
+                    f"- PB: {pb['current']:.2f}" f" (百分位 {pb_pct}%)"
+                    if pb_pct is not None
+                    else f"- PB: {pb['current']:.2f}"
+                )
+            if ps_ttm.get("current") is not None:
+                lines.append(f"- PS(TTM): {ps_ttm['current']:.2f}")
+            lines.append(f"- 估值水平: {level}")
+
+            market_cap = data.get("market_cap", {})
+            total_mv = market_cap.get("total_mv")
+            if total_mv is not None:
+                lines.append(f"- 总市值: {total_mv / 10000:.2f}亿元")
+
+            summary_text = "\n".join(lines)
+
+            # Build artifacts
+            artifacts = []
+
+            # 1) Valuation metrics table artifact
+            metric_rows = []
+            label_map = {
+                "pe": "PE (静态)",
+                "pe_ttm": "PE (TTM)",
+                "pb": "PB",
+                "ps": "PS (静态)",
+                "ps_ttm": "PS (TTM)",
+                "dv_ratio": "股息率",
+                "dv_ttm": "股息率(TTM)",
+            }
+            for key, label in label_map.items():
+                m = metrics.get(key)
+                if not m:
+                    continue
+                metric_rows.append(
+                    {
+                        "metric": label,
+                        "current": m.get("current"),
+                        "percentile": (
+                            f"{m['percentile']}%"
+                            if m.get("percentile") is not None
+                            else None
+                        ),
+                        "min": m.get("min"),
+                        "max": m.get("max"),
+                        "mean": m.get("mean"),
+                        "median": m.get("median"),
+                    }
+                )
+
+            artifacts.append(
+                create_artifact_envelope(
+                    component_type="table",
+                    name=f"Valuation Metrics: {ts_code}",
+                    content={
+                        "title": "估值指标",
+                        "tag": ts_code,
+                        "valuation_level": level,
+                        "columns": [
+                            {"key": "metric", "label": "指标"},
+                            {"key": "current", "label": "当前值", "align": "right"},
+                            {
+                                "key": "percentile",
+                                "label": "历史百分位",
+                                "align": "right",
+                            },
+                            {"key": "min", "label": "最小值", "align": "right"},
+                            {"key": "max", "label": "最大值", "align": "right"},
+                            {"key": "mean", "label": "均值", "align": "right"},
+                            {"key": "median", "label": "中位数", "align": "right"},
+                        ],
+                        "rows": metric_rows,
+                    },
+                    description=f"Valuation metrics with percentile ranking for {ts_code}",
+                    metadata={
+                        "type": "table",
+                        "ts_code": ts_code,
+                        "dataset": "valuation_metrics",
+                    },
+                    visible_to_llm=False,
+                    display_in_report=True,
+                )
+            )
+
+            # 2) Valuation history chart artifact
+            history = data.get("history", {})
+            if history.get("dates"):
+                artifacts.append(
+                    create_artifact_envelope(
+                        component_type="valuation_chart",
+                        name=f"Valuation History: {ts_code}",
+                        content={
+                            "title": "估值历史走势",
+                            "ts_code": ts_code,
+                            "dates": history.get("dates", []),
+                            "pe_ttm": history.get("pe_ttm", []),
+                            "pb": history.get("pb", []),
+                            "ps_ttm": history.get("ps_ttm", []),
+                        },
+                        description=(
+                            f"Historical PE(TTM)/PB/PS(TTM) chart for {ts_code} "
+                            f"({days} trading days)"
+                        ),
+                        metadata={
+                            "type": "valuation_chart",
+                            "ts_code": ts_code,
+                        },
+                        visible_to_llm=False,
+                        display_in_report=True,
+                    )
+                )
+
+            if ctx:
+                await ctx.info(
+                    f"✅ 估值指标获取完成: {ts_code}",
+                    extra={"level": level},
+                )
+
+            return create_artifact_list_response(
+                summary=summary_text,
+                artifacts=artifacts,
+            )
+
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
+            return create_symbol_error_response(
+                e,
+                component_type="valuation_metrics",
+                name=f"{symbol} 估值指标",
+            )
+        except Exception as e:
+            logger.error(f"Get valuation metrics failed: {e}")
+            if ctx:
+                await ctx.error(
+                    f"❌ 获取估值指标失败: {symbol}",
+                    extra={"error": str(e)},
                 )
             return {"error": str(e)}

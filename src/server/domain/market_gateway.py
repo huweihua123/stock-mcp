@@ -117,7 +117,9 @@ class MarketGateway:
                     instrument = await self.resolve_instrument(raw)
                     price = await self._router.get_real_time_price(instrument)
                     results[raw] = (
-                        price.to_dict() if price and hasattr(price, "to_dict") else price
+                        price.to_dict()
+                        if price and hasattr(price, "to_dict")
+                        else price
                     )
                 except SymbolResolutionError as e:
                     results[raw] = {"error": e.to_dict()}
@@ -202,6 +204,12 @@ class MarketGateway:
         ticker = await self.resolve_ticker(raw_symbol)
         return await self._adapter_manager.get_dividend_info(ticker)
 
+    async def get_valuation_metrics(
+        self, raw_symbol: str, days: int = 250
+    ) -> Dict[str, Any]:
+        ticker = await self.resolve_ticker(raw_symbol)
+        return await self._adapter_manager.get_valuation_metrics(ticker, days)
+
     async def get_money_flow(self, raw_symbol: str, days: int = 20) -> Dict[str, Any]:
         ticker = await self.resolve_ticker(raw_symbol)
         return await self._adapter_manager.get_money_flow(ticker, days)
@@ -209,27 +217,31 @@ class MarketGateway:
     async def get_north_bound_flow(self, days: int = 30) -> Dict[str, Any]:
         return await self._adapter_manager.get_north_bound_flow(days)
 
-    async def get_chip_distribution(self, raw_symbol: str, days: int = 30) -> Dict[str, Any]:
+    async def get_chip_distribution(
+        self, raw_symbol: str, days: int = 30
+    ) -> Dict[str, Any]:
         ticker = await self.resolve_ticker(raw_symbol)
         return await self._adapter_manager.get_chip_distribution(ticker, days)
 
-    async def get_money_supply(self) -> Dict[str, Any]:
-        return await self._adapter_manager.get_money_supply()
+    async def get_money_supply(self, months: int = 60) -> Dict[str, Any]:
+        return await self._adapter_manager.get_money_supply(months)
 
-    async def get_inflation_data(self) -> Dict[str, Any]:
-        return await self._adapter_manager.get_inflation_data()
+    async def get_inflation_data(self, months: int = 60) -> Dict[str, Any]:
+        return await self._adapter_manager.get_inflation_data(months)
 
-    async def get_pmi_data(self) -> Dict[str, Any]:
-        return await self._adapter_manager.get_pmi_data()
+    async def get_pmi_data(self, months: int = 60) -> Dict[str, Any]:
+        return await self._adapter_manager.get_pmi_data(months)
 
-    async def get_gdp_data(self) -> Dict[str, Any]:
-        return await self._adapter_manager.get_gdp_data()
+    async def get_gdp_data(self, quarters: int = 20) -> Dict[str, Any]:
+        return await self._adapter_manager.get_gdp_data(quarters)
 
-    async def get_social_financing(self) -> Dict[str, Any]:
-        return await self._adapter_manager.get_social_financing()
+    async def get_social_financing(self, months: int = 60) -> Dict[str, Any]:
+        return await self._adapter_manager.get_social_financing(months)
 
-    async def get_interest_rates(self) -> Dict[str, Any]:
-        return await self._adapter_manager.get_interest_rates()
+    async def get_interest_rates(
+        self, shibor_days: int = 252, lpr_months: int = 60
+    ) -> Dict[str, Any]:
+        return await self._adapter_manager.get_interest_rates(shibor_days, lpr_months)
 
     async def get_market_liquidity(self, days: int = 60) -> Dict[str, Any]:
         return await self._adapter_manager.get_market_liquidity(days)
@@ -237,8 +249,17 @@ class MarketGateway:
     async def get_market_money_flow(self) -> Dict[str, Any]:
         return await self._adapter_manager.get_market_money_flow()
 
-    async def get_sector_trend(self, sector_name: str, days: int = 10) -> Dict[str, Any]:
+    async def get_sector_trend(
+        self, sector_name: str, days: int = 10
+    ) -> Dict[str, Any]:
         return await self._adapter_manager.get_sector_trend(sector_name, days)
+
+    async def get_sector_money_flow_history(
+        self, sector_name: str, days: int = 20
+    ) -> Dict[str, Any]:
+        return await self._adapter_manager.get_sector_money_flow_history(
+            sector_name, days
+        )
 
     async def get_ggt_daily(self, days: int = 60) -> Dict[str, Any]:
         return await self._adapter_manager.get_ggt_daily(days)

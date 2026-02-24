@@ -808,75 +808,89 @@ class AdapterManager:
 
         raise ValueError(f"All adapters failed to fetch chip distribution for {ticker}")
 
-    async def get_money_supply(self) -> Dict[str, Any]:
+    async def get_money_supply(self, months: int = 60) -> Dict[str, Any]:
         """获取货币供应量数据 (带自动降级)."""
         for adapter in self._adapter_order:
             try:
-                return await adapter.get_money_supply()
+                return await adapter.get_money_supply(months)
             except NotImplementedError:
                 continue
             except Exception as e:
-                logger.warning(f"Adapter {adapter.source.value} failed for money supply: {e}")
+                logger.warning(
+                    f"Adapter {adapter.source.value} failed for money supply: {e}"
+                )
                 continue
         raise ValueError("No adapter supports money supply data")
 
-    async def get_inflation_data(self) -> Dict[str, Any]:
+    async def get_inflation_data(self, months: int = 60) -> Dict[str, Any]:
         """获取通胀数据 (带自动降级)."""
         for adapter in self._adapter_order:
             try:
-                return await adapter.get_inflation_data()
+                return await adapter.get_inflation_data(months)
             except NotImplementedError:
                 continue
             except Exception as e:
-                logger.warning(f"Adapter {adapter.source.value} failed for inflation data: {e}")
+                logger.warning(
+                    f"Adapter {adapter.source.value} failed for inflation data: {e}"
+                )
                 continue
         raise ValueError("No adapter supports inflation data")
 
-    async def get_pmi_data(self) -> Dict[str, Any]:
+    async def get_pmi_data(self, months: int = 60) -> Dict[str, Any]:
         """获取 PMI 数据 (带自动降级)."""
         for adapter in self._adapter_order:
             try:
-                return await adapter.get_pmi_data()
+                return await adapter.get_pmi_data(months)
             except NotImplementedError:
                 continue
             except Exception as e:
-                logger.warning(f"Adapter {adapter.source.value} failed for PMI data: {e}")
+                logger.warning(
+                    f"Adapter {adapter.source.value} failed for PMI data: {e}"
+                )
                 continue
         raise ValueError("No adapter supports PMI data")
 
-    async def get_gdp_data(self) -> Dict[str, Any]:
+    async def get_gdp_data(self, quarters: int = 20) -> Dict[str, Any]:
         """获取 GDP 数据 (带自动降级)."""
         for adapter in self._adapter_order:
             try:
-                return await adapter.get_gdp_data()
+                return await adapter.get_gdp_data(quarters)
             except NotImplementedError:
                 continue
             except Exception as e:
-                logger.warning(f"Adapter {adapter.source.value} failed for GDP data: {e}")
+                logger.warning(
+                    f"Adapter {adapter.source.value} failed for GDP data: {e}"
+                )
                 continue
         raise ValueError("No adapter supports GDP data")
 
-    async def get_social_financing(self) -> Dict[str, Any]:
+    async def get_social_financing(self, months: int = 60) -> Dict[str, Any]:
         """获取社融数据 (带自动降级)."""
         for adapter in self._adapter_order:
             try:
-                return await adapter.get_social_financing()
+                return await adapter.get_social_financing(months)
             except NotImplementedError:
                 continue
             except Exception as e:
-                logger.warning(f"Adapter {adapter.source.value} failed for social financing: {e}")
+                logger.warning(
+                    f"Adapter {adapter.source.value} failed for social financing: {e}"
+                )
                 continue
         raise ValueError("No adapter supports social financing data")
 
-    async def get_interest_rates(self) -> Dict[str, Any]:
+    async def get_interest_rates(
+        self, shibor_days: int = 252, lpr_months: int = 60
+    ) -> Dict[str, Any]:
         """获取利率数据 (带自动降级)."""
         for adapter in self._adapter_order:
             try:
-                return await adapter.get_interest_rates()
+                return await adapter.get_interest_rates(shibor_days, lpr_months)
             except NotImplementedError:
                 continue
             except Exception as e:
-                logger.warning(f"Adapter {adapter.source.value} failed for interest rates: {e}")
+                logger.warning(
+                    f"Adapter {adapter.source.value} failed for interest rates: {e}"
+                )
                 continue
         raise ValueError("No adapter supports interest rate data")
 
@@ -888,11 +902,15 @@ class AdapterManager:
             except NotImplementedError:
                 continue
             except Exception as e:
-                logger.warning(f"Adapter {adapter.source.value} failed for market liquidity: {e}")
+                logger.warning(
+                    f"Adapter {adapter.source.value} failed for market liquidity: {e}"
+                )
                 continue
         raise ValueError("No adapter supports market liquidity data")
 
-    async def get_market_money_flow(self, trade_date: Optional[str] = None) -> Dict[str, Any]:
+    async def get_market_money_flow(
+        self, trade_date: Optional[str] = None
+    ) -> Dict[str, Any]:
         """获取市场资金流向 (带自动降级)."""
         for adapter in self._adapter_order:
             try:
@@ -900,11 +918,15 @@ class AdapterManager:
             except NotImplementedError:
                 continue
             except Exception as e:
-                logger.warning(f"Adapter {adapter.source.value} failed for market money flow: {e}")
+                logger.warning(
+                    f"Adapter {adapter.source.value} failed for market money flow: {e}"
+                )
                 continue
         raise ValueError("No adapter supports market money flow data")
 
-    async def get_sector_trend(self, sector_name: str, days: int = 10) -> Dict[str, Any]:
+    async def get_sector_trend(
+        self, sector_name: str, days: int = 10
+    ) -> Dict[str, Any]:
         """获取板块走势 (带自动降级)."""
         for adapter in self._adapter_order:
             try:
@@ -912,9 +934,28 @@ class AdapterManager:
             except NotImplementedError:
                 continue
             except Exception as e:
-                logger.warning(f"Adapter {adapter.source.value} failed for sector trend: {e}")
+                logger.warning(
+                    f"Adapter {adapter.source.value} failed for sector trend: {e}"
+                )
                 continue
         raise ValueError("No adapter supports sector trend data")
+
+    async def get_sector_money_flow_history(
+        self, sector_name: str, days: int = 20
+    ) -> Dict[str, Any]:
+        """获取板块资金流向历史 (带自动降级)."""
+        for adapter in self._adapter_order:
+            try:
+                return await adapter.get_sector_money_flow_history(sector_name, days)
+            except NotImplementedError:
+                continue
+            except Exception as e:
+                logger.warning(
+                    f"Adapter {adapter.source.value} failed for "
+                    f"sector money flow history: {e}"
+                )
+                continue
+        raise ValueError("No adapter supports sector money flow history data")
 
     async def get_ggt_daily(self, days: int = 60) -> Dict[str, Any]:
         """获取港股通每日成交统计 (带自动降级)."""
@@ -924,7 +965,9 @@ class AdapterManager:
             except NotImplementedError:
                 continue
             except Exception as e:
-                logger.warning(f"Adapter {adapter.source.value} failed for ggt daily: {e}")
+                logger.warning(
+                    f"Adapter {adapter.source.value} failed for ggt daily: {e}"
+                )
                 continue
         raise ValueError("No adapter supports ggt daily data")
 
@@ -938,7 +981,9 @@ class AdapterManager:
             return await adapter.get_mainbz_info(ticker)
         except Exception as e:
             if isinstance(e, NotImplementedError):
-                logger.warning(f"Adapter {adapter.source.value} does not support mainbz info")
+                logger.warning(
+                    f"Adapter {adapter.source.value} does not support mainbz info"
+                )
             else:
                 logger.warning(f"Adapter {adapter.source.value} failed: {e}")
 
@@ -960,7 +1005,9 @@ class AdapterManager:
                         )
                         continue
 
-            raise ValueError(f"All adapters failed to fetch mainbz info for {ticker}: {e}")
+            raise ValueError(
+                f"All adapters failed to fetch mainbz info for {ticker}: {e}"
+            )
 
     async def get_shareholder_info(self, ticker: str) -> Dict[str, Any]:
         """获取股东信息 (带自动降级)."""
@@ -972,7 +1019,9 @@ class AdapterManager:
             return await adapter.get_shareholder_info(ticker)
         except Exception as e:
             if isinstance(e, NotImplementedError):
-                logger.warning(f"Adapter {adapter.source.value} does not support shareholder info")
+                logger.warning(
+                    f"Adapter {adapter.source.value} does not support shareholder info"
+                )
             else:
                 logger.warning(f"Adapter {adapter.source.value} failed: {e}")
 
@@ -996,6 +1045,48 @@ class AdapterManager:
 
             raise ValueError(
                 f"All adapters failed to fetch shareholder info for {ticker}: {e}"
+            )
+
+    async def get_valuation_metrics(
+        self, ticker: str, days: int = 250
+    ) -> Dict[str, Any]:
+        """获取估值指标数据 (带自动降级)."""
+        adapter = self.get_adapter_for_ticker(ticker)
+        if not adapter:
+            raise ValueError(f"No adapter found for ticker {ticker}")
+
+        try:
+            return await adapter.get_valuation_metrics(ticker, days)
+        except Exception as e:
+            if isinstance(e, NotImplementedError):
+                logger.warning(
+                    f"Adapter {adapter.source.value} does not support valuation metrics"
+                )
+            else:
+                logger.warning(f"Adapter {adapter.source.value} failed: {e}")
+
+            if ":" in ticker:
+                exchange, _ = ticker.split(":", 1)
+                adapters = self.get_adapters_for_exchange(exchange)
+
+                for alt in adapters:
+                    if alt is adapter:
+                        continue
+                    try:
+                        logger.info(
+                            f"Trying failover adapter {alt.source.value} "
+                            f"for valuation metrics of {ticker}"
+                        )
+                        return await alt.get_valuation_metrics(ticker, days)
+                    except Exception as failover_error:
+                        logger.warning(
+                            f"Failover adapter {alt.source.value} also failed: "
+                            f"{failover_error}"
+                        )
+                        continue
+
+            raise ValueError(
+                f"All adapters failed to fetch valuation metrics for {ticker}: {e}"
             )
 
     async def get_technical_indicators(
@@ -1058,7 +1149,9 @@ class AdapterManager:
                     )
                     continue
 
-        raise ValueError(f"All adapters failed to fetch technical indicators for {ticker}")
+        raise ValueError(
+            f"All adapters failed to fetch technical indicators for {ticker}"
+        )
 
 
 # Singleton instance

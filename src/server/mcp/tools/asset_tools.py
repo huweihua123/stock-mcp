@@ -13,7 +13,7 @@ Disabled Tools:
   - get_market_report: 🔇 聚合工具，应由 Agent 层调用原子工具组合
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from fastmcp import FastMCP, Context
@@ -36,7 +36,6 @@ from src.server.domain.symbols.errors import SymbolResolutionError
 
 def register_asset_tools(mcp: FastMCP):
     """Register asset-related tools."""
-
 
     async def get_asset_info(ticker: str, ctx: Context = None) -> Dict[str, Any]:
         """Get detailed asset information.
@@ -61,10 +60,10 @@ def register_asset_tools(mcp: FastMCP):
             if asset:
                 result = asset
                 result["component_type"] = "asset_info"
-                
+
                 if ctx:
                     await ctx.info(f"✅ 获取资产信息完成: {ticker}")
-                
+
                 # 构造 Artifact
                 artifact = create_artifact_envelope(
                     component_type="asset_info",
@@ -72,16 +71,16 @@ def register_asset_tools(mcp: FastMCP):
                     content=result,
                     description=f"{result.get('name')} ({ticker}) 基本信息",
                 )
-                
+
                 # 构造 Summary
                 summary = (
                     f"已获取 {result.get('name')} ({ticker}) 的基本信息。\\n"
                     f"行业：{result.get('industry')}\\n"
                     f"市值：{result.get('market_cap')}"
                 )
-                
+
                 return create_artifact_response(summary=summary, artifact=artifact)
-            
+
             if ctx:
                 await ctx.warning(f"⚠️ 未找到资产信息: {ticker}")
 
@@ -100,8 +99,7 @@ def register_asset_tools(mcp: FastMCP):
             logger.error(f"Get asset info failed: {e}")
             if ctx:
                 await ctx.error(
-                    f"❌ 获取资产信息失败: {ticker}",
-                    extra={"error": str(e)}
+                    f"❌ 获取资产信息失败: {ticker}", extra={"error": str(e)}
                 )
             return {"error": str(e), "component_type": "asset_info"}
 
@@ -128,11 +126,11 @@ def register_asset_tools(mcp: FastMCP):
             if price:
                 result = price
                 result["component_type"] = "real_time_price"
-                
+
                 if ctx:
                     await ctx.info(
                         f"✅ 获取实时价格完成: {ticker}",
-                        extra={"price": result.get("price")}
+                        extra={"price": result.get("price")},
                     )
 
                 # 构造 Artifact
@@ -144,7 +142,7 @@ def register_asset_tools(mcp: FastMCP):
                         f"{ticker} 当前价格: {result.get('price')} {result.get('currency')}"
                     ),
                 )
-                
+
                 # 构造 Summary
                 summary = (
                     f"{ticker} 最新价 {result.get('price')} {result.get('currency')}，"
@@ -152,7 +150,7 @@ def register_asset_tools(mcp: FastMCP):
                 )
 
                 return create_artifact_response(summary=summary, artifact=artifact)
-            
+
             if ctx:
                 await ctx.warning(f"⚠️ 未找到实时价格: {ticker}")
 
@@ -171,12 +169,13 @@ def register_asset_tools(mcp: FastMCP):
             logger.error(f"Get real-time price failed: {e}")
             if ctx:
                 await ctx.error(
-                    f"❌ 获取实时价格失败: {ticker}",
-                    extra={"error": str(e)}
+                    f"❌ 获取实时价格失败: {ticker}", extra={"error": str(e)}
                 )
             return {"error": str(e), "component_type": "real_time_price"}
 
-    async def get_multiple_prices(tickers: list[str], ctx: Context = None) -> Dict[str, Any]:
+    async def get_multiple_prices(
+        tickers: list[str], ctx: Context = None
+    ) -> Dict[str, Any]:
         """Get real-time prices for multiple assets.
 
         Args:
@@ -191,14 +190,13 @@ def register_asset_tools(mcp: FastMCP):
         """
         if ctx:
             await ctx.info(
-                f"🔧 批量获取价格: {len(tickers)}个资产",
-                extra={"tickers": tickers}
+                f"🔧 批量获取价格: {len(tickers)}个资产", extra={"tickers": tickers}
             )
 
         try:
             result = await market_use_cases.get_multiple_prices(tickers)
             result["component_type"] = "multiple_prices"
-            
+
             if ctx:
                 await ctx.info(f"✅ 批量获取价格完成: {len(result)}个结果")
 
@@ -209,7 +207,7 @@ def register_asset_tools(mcp: FastMCP):
                 content=result,
                 description=f"包含 {len(tickers)} 个资产的实时价格",
             )
-            
+
             # 构造 Summary
             summary = f"已获取 {len(tickers)} 个资产的实时价格。"
 
@@ -224,34 +222,92 @@ def register_asset_tools(mcp: FastMCP):
         except Exception as e:
             logger.error(f"MCP tool error in get_multiple_prices: {e}", exc_info=True)
             if ctx:
-                await ctx.error(
-                    f"❌ 批量获取价格失败",
-                    extra={"error": str(e)}
-                )
+                await ctx.error(f"❌ 批量获取价格失败", extra={"error": str(e)})
             return {"error": str(e), "component_type": "multiple_prices"}
 
     @mcp.tool(tags={"asset"})
     async def get_kline_data(
-        ticker: str, start_date: str, end_date: str, interval: str = "1d", ctx: Context = None) -> Dict[str, Any]:
+        ticker: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        interval: str = "1d",
+        period: str | None = None,
+        limit: int | None = None,
+        ctx: Context = None,
+    ) -> Dict[str, Any]:
         """Get K-line historical price data.
+
+        Supports two usage modes:
+        1. Date range mode: provide start_date + end_date
+        2. Period + limit mode: provide period and/or limit,
+           dates are auto-calculated from today
 
         Args:
             ticker: Asset ticker. Format: EXCHANGE:SYMBOL
                 - A股: SSE:600519 (上交所), SZSE:000001 (深交所)
                 - 美股: NASDAQ:AAPL, NYSE:TSLA
-                - 加密货币: CRYPTO:BTC, CRYPTO:ETH
-            start_date: Start date (YYYY-MM-DD)
-            end_date: End date (YYYY-MM-DD)
+            start_date: Start date (YYYY-MM-DD), optional if
+                limit is provided
+            end_date: End date (YYYY-MM-DD), defaults to today
             interval: Data interval (1d, 1wk, 1mo)
+            period: Shorthand for interval: "daily" -> 1d,
+                "weekly" -> 1wk, "monthly" -> 1mo.
+                If provided, overrides interval.
+            limit: Number of data points (trading days) to
+                fetch. Auto-derives start_date from today.
+                E.g. limit=60 fetches ~60 trading days.
             ctx: FastMCP Context for logging
 
         Returns:
             Dictionary containing historical price data list
         """
+        # Resolve period -> interval mapping
+        if period:
+            period_map = {
+                "daily": "1d",
+                "weekly": "1wk",
+                "monthly": "1mo",
+                "1d": "1d",
+                "1wk": "1wk",
+                "1mo": "1mo",
+            }
+            interval = period_map.get(period.lower(), interval)
+
+        # Resolve dates
+        if end_date:
+            end = datetime.strptime(end_date, "%Y-%m-%d")
+        else:
+            end = datetime.now()
+            end_date = end.strftime("%Y-%m-%d")
+
+        if start_date:
+            start = datetime.strptime(start_date, "%Y-%m-%d")
+        elif limit:
+            # Estimate calendar days from trading days
+            if interval in ("1wk", "weekly"):
+                calendar_days = limit * 7 + 14
+            elif interval in ("1mo", "monthly"):
+                calendar_days = limit * 31 + 31
+            else:
+                # daily: ~1.5x for weekends/holidays
+                calendar_days = int(limit * 1.5) + 10
+            start = end - timedelta(days=calendar_days)
+            start_date = start.strftime("%Y-%m-%d")
+        else:
+            # Default: 6 months
+            start = end - timedelta(days=180)
+            start_date = start.strftime("%Y-%m-%d")
+
         if ctx:
             await ctx.info(
                 f"🔧 获取历史价格: {ticker}",
-                extra={"ticker": ticker, "start": start_date, "end": end_date, "interval": interval}
+                extra={
+                    "ticker": ticker,
+                    "start": start_date,
+                    "end": end_date,
+                    "interval": interval,
+                    "limit": limit,
+                },
             )
 
         try:
@@ -262,17 +318,21 @@ def register_asset_tools(mcp: FastMCP):
                 end=end_date,
             )
 
-            start = datetime.strptime(start_date, "%Y-%m-%d")
-            end = datetime.strptime(end_date, "%Y-%m-%d")
-
             prices = await market_use_cases.get_historical_prices(
-                ticker=ticker, start_date=start, end_date=end, interval=interval
+                ticker=ticker,
+                start_date=start,
+                end_date=end,
+                interval=interval,
             )
-            
+
+            # If limit specified, trim to exact count
+            if limit and len(prices) > limit:
+                prices = prices[-limit:]
+
             if ctx:
                 await ctx.info(
                     f"✅ 获取历史价格完成: {ticker}",
-                    extra={"count": len(prices)}
+                    extra={"count": len(prices)},
                 )
 
             result = {
@@ -281,7 +341,9 @@ def register_asset_tools(mcp: FastMCP):
                 "data": prices,
             }
 
-            description = f"{ticker}历史价格: {start_date}至{end_date}, 共{len(prices)}条数据"
+            description = (
+                f"{ticker}历史价格: {start_date}至{end_date}, " f"共{len(prices)}条数据"
+            )
 
             artifact = create_artifact_envelope(
                 component_type="price_chart",
@@ -291,20 +353,25 @@ def register_asset_tools(mcp: FastMCP):
                 visible_to_llm=False,
                 display_in_report=True,
             )
-            
+
             return create_artifact_response(summary=description, artifact=artifact)
 
         except SymbolResolutionError as e:
             if ctx:
-                await ctx.warning(f"⚠️ 符号解析失败: {ticker}", extra=e.to_dict())
+                await ctx.warning(
+                    f"⚠️ 符号解析失败: {ticker}",
+                    extra=e.to_dict(),
+                )
             return create_symbol_error_response(
-                e, component_type="price_chart", name=f"{ticker} 历史价格"
+                e,
+                component_type="price_chart",
+                name=f"{ticker} 历史价格",
             )
         except Exception as e:
             logger.error(f"Get historical prices failed: {e}")
             if ctx:
                 await ctx.error(
                     f"❌ 获取历史价格失败: {ticker}",
-                    extra={"error": str(e)}
+                    extra={"error": str(e)},
                 )
             return {"error": str(e), "component_type": "kline_chart"}

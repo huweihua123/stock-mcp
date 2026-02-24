@@ -225,37 +225,35 @@ class BaseDataAdapter(abc.ABC):
             f"{self.source.value} does not support get_chip_distribution"
         )
 
-    async def get_money_supply(self) -> Dict[str, Any]:
+    async def get_money_supply(self, months: int = 60) -> Dict[str, Any]:
         """获取货币供应量数据 (Optional)."""
         raise NotImplementedError(
             f"{self.source.value} does not support get_money_supply"
         )
 
-    async def get_inflation_data(self) -> Dict[str, Any]:
+    async def get_inflation_data(self, months: int = 60) -> Dict[str, Any]:
         """获取通胀数据 (Optional)."""
         raise NotImplementedError(
             f"{self.source.value} does not support get_inflation_data"
         )
 
-    async def get_pmi_data(self) -> Dict[str, Any]:
+    async def get_pmi_data(self, months: int = 60) -> Dict[str, Any]:
         """获取 PMI 数据 (Optional)."""
-        raise NotImplementedError(
-            f"{self.source.value} does not support get_pmi_data"
-        )
+        raise NotImplementedError(f"{self.source.value} does not support get_pmi_data")
 
-    async def get_gdp_data(self) -> Dict[str, Any]:
+    async def get_gdp_data(self, quarters: int = 20) -> Dict[str, Any]:
         """获取 GDP 数据 (Optional)."""
-        raise NotImplementedError(
-            f"{self.source.value} does not support get_gdp_data"
-        )
+        raise NotImplementedError(f"{self.source.value} does not support get_gdp_data")
 
-    async def get_social_financing(self) -> Dict[str, Any]:
+    async def get_social_financing(self, months: int = 60) -> Dict[str, Any]:
         """获取社融数据 (Optional)."""
         raise NotImplementedError(
             f"{self.source.value} does not support get_social_financing"
         )
 
-    async def get_interest_rates(self) -> Dict[str, Any]:
+    async def get_interest_rates(
+        self, shibor_days: int = 252, lpr_months: int = 60
+    ) -> Dict[str, Any]:
         """获取利率数据 (Optional)."""
         raise NotImplementedError(
             f"{self.source.value} does not support get_interest_rates"
@@ -267,13 +265,17 @@ class BaseDataAdapter(abc.ABC):
             f"{self.source.value} does not support get_market_liquidity"
         )
 
-    async def get_market_money_flow(self, trade_date: Optional[str] = None) -> Dict[str, Any]:
+    async def get_market_money_flow(
+        self, trade_date: Optional[str] = None
+    ) -> Dict[str, Any]:
         """获取市场资金流向数据 (Optional)."""
         raise NotImplementedError(
             f"{self.source.value} does not support get_market_money_flow"
         )
 
-    async def get_sector_trend(self, sector_name: str, days: int = 10) -> Dict[str, Any]:
+    async def get_sector_trend(
+        self, sector_name: str, days: int = 10
+    ) -> Dict[str, Any]:
         """获取板块走势数据 (Optional)."""
         raise NotImplementedError(
             f"{self.source.value} does not support get_sector_trend"
@@ -281,9 +283,7 @@ class BaseDataAdapter(abc.ABC):
 
     async def get_ggt_daily(self, days: int = 60) -> Dict[str, Any]:
         """获取港股通每日成交统计 (Optional)."""
-        raise NotImplementedError(
-            f"{self.source.value} does not support get_ggt_daily"
-        )
+        raise NotImplementedError(f"{self.source.value} does not support get_ggt_daily")
 
     async def get_mainbz_info(self, ticker: str) -> Dict[str, Any]:
         """获取主营业务构成 (Optional)."""
@@ -295,6 +295,38 @@ class BaseDataAdapter(abc.ABC):
         """获取股东信息 (Optional)."""
         raise NotImplementedError(
             f"{self.source.value} does not support get_shareholder_info"
+        )
+
+    async def get_valuation_metrics(
+        self, ticker: str, days: int = 250
+    ) -> Dict[str, Any]:
+        """获取估值指标数据 (PE/PB/PS + 历史百分位) (Optional).
+
+        Args:
+            ticker: 股票代码 (内部格式)
+            days: 拉取最近 N 个交易日数据
+
+        Returns:
+            包含估值指标及百分位信息的字典
+        """
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_valuation_metrics"
+        )
+
+    async def get_sector_money_flow_history(
+        self, sector_name: str, days: int = 20
+    ) -> Dict[str, Any]:
+        """获取板块资金流向历史数据 (Optional).
+
+        Args:
+            sector_name: 板块名称
+            days: 获取最近 N 个交易日数据
+
+        Returns:
+            包含板块资金流向历史数据的字典
+        """
+        raise NotImplementedError(
+            f"{self.source.value} does not support " "get_sector_money_flow_history"
         )
 
     async def get_technical_indicators(

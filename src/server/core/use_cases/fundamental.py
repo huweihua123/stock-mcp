@@ -33,9 +33,17 @@ async def get_dividend_info(ticker: str) -> Dict[str, Any]:
     return await manager.get_dividend_info(ticker)
 
 
+async def get_valuation_metrics(ticker: str, days: int = 250) -> Dict[str, Any]:
+    manager = Container.market_gateway()
+    logger.info("UseCase: get_valuation_metrics", symbol=ticker, days=days)
+    return await manager.get_valuation_metrics(ticker, days)
+
+
 async def get_fundamental_analysis(ticker: str) -> Dict[str, Any]:
     service = Container.fundamental_service()
     gateway = Container.market_gateway()
     resolved = await gateway.resolve_ticker(ticker)
-    logger.info("UseCase: get_fundamental_analysis", symbol=ticker, resolved_ticker=resolved)
+    logger.info(
+        "UseCase: get_fundamental_analysis", symbol=ticker, resolved_ticker=resolved
+    )
     return await service.get_fundamental_analysis(resolved)

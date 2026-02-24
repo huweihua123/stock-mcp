@@ -34,8 +34,6 @@ def register_money_flow_tools(mcp: FastMCP):
         resolved = await Container.market_gateway().resolve_ticker(raw_symbol)
         return to_ts_code(resolved)
 
-
-
     @mcp.tool(tags={"money-flow"})
     async def get_money_flow(
         symbol: str, days: int = 20, ctx: Context = None
@@ -122,11 +120,8 @@ def register_money_flow_tools(mcp: FastMCP):
                 visible_to_llm=False,
                 display_in_report=True,
             )
-            
-            return create_artifact_response(
-                summary=summary_text,
-                artifact=artifact
-            )
+
+            return create_artifact_response(summary=summary_text, artifact=artifact)
 
         except SymbolResolutionError as e:
             if ctx:
@@ -151,7 +146,9 @@ def register_money_flow_tools(mcp: FastMCP):
                 visible_to_llm=False,
                 display_in_report=True,
             )
-            return create_artifact_response(summary="No money flow data", artifact=artifact)
+            return create_artifact_response(
+                summary="No money flow data", artifact=artifact
+            )
 
     @mcp.tool(tags={"money-flow"})
     async def get_north_bound_flow(
@@ -195,11 +192,8 @@ def register_money_flow_tools(mcp: FastMCP):
                 content=result,
                 description=summary_text,
             )
-            
-            return create_artifact_response(
-                summary=summary_text,
-                artifact=artifact
-            )
+
+            return create_artifact_response(summary=summary_text, artifact=artifact)
 
         except Exception as e:
             logger.error(f"Get north bound flow failed: {e}", exc_info=True)
@@ -270,7 +264,9 @@ def register_money_flow_tools(mcp: FastMCP):
 
             # Normalize to competitor format
             ts_code = result.get("ts_code") or result.get("symbol") or raw_symbol
-            fallback_exchange = raw_symbol.split(":", 1)[0] if ":" in raw_symbol else None
+            fallback_exchange = (
+                raw_symbol.split(":", 1)[0] if ":" in raw_symbol else None
+            )
             ts_code = to_ts_code(ts_code, fallback_exchange=fallback_exchange)
 
             # 构建摘要
@@ -305,7 +301,8 @@ def register_money_flow_tools(mcp: FastMCP):
                     "avg_cost": result.get("avg_cost") or summary.get("avg_cost"),
                     "support_price": result.get("support_price"),
                     "resistance_price": result.get("resistance_price"),
-                    "profit_ratio": result.get("profit_ratio") or summary.get("profit_ratio"),
+                    "profit_ratio": result.get("profit_ratio")
+                    or summary.get("profit_ratio"),
                     "loss_ratio": result.get("loss_ratio"),
                     "flat_ratio": result.get("flat_ratio"),
                     "distribution": result.get("distribution") or [],
@@ -328,11 +325,8 @@ def register_money_flow_tools(mcp: FastMCP):
                     "price_trade_date": result.get("price_trade_date"),
                 },
             )
-            
-            return create_artifact_response(
-                summary=summary_text,
-                artifact=artifact
-            )
+
+            return create_artifact_response(summary=summary_text, artifact=artifact)
 
         except SymbolResolutionError as e:
             if ctx:
@@ -353,19 +347,22 @@ def register_money_flow_tools(mcp: FastMCP):
             }
 
     @mcp.tool(tags={"money-flow"})
-    async def get_money_supply(ctx: Context = None) -> Dict[str, Any]:
+    async def get_money_supply(months: int = 60, ctx: Context = None) -> Dict[str, Any]:
         """获取中国货币流动性 (M1/M2)."""
         if ctx:
-            await ctx.info("🔧 获取货币供应量")
+            await ctx.info("🔧 获取货币供应量", extra={"months": months})
 
         try:
-            logger.info("MCP tool called: get_money_supply")
-            result = await money_flow_use_cases.get_money_supply()
+            logger.info("MCP tool called: get_money_supply", months=months)
+            result = await money_flow_use_cases.get_money_supply(months)
             result["component_type"] = "money_supply"
 
-            summary_text = "中国货币流动性：M1/M2 增速与剪刀差（近 5 年）"
+            summary_text = f"中国货币流动性：M1/M2 增速与剪刀差（近 {months} 个月）"
 
-            content = result.get("data", [])
+            content = result.get("data", []) or []
+            content = sorted(content, key=lambda x: str(x.get("month", "")))
+            if months > 0:
+                content = content[-months:]
             artifact = create_artifact_envelope(
                 component_type="money_supply",
                 name="Money Supply Data",
@@ -382,21 +379,28 @@ def register_money_flow_tools(mcp: FastMCP):
             return {"error": str(e), "component_type": "money_supply"}
 
     @mcp.tool(tags={"money-flow"})
-    async def get_inflation_data(ctx: Context = None) -> Dict[str, Any]:
+    async def get_inflation_data(
+        months: int = 60, ctx: Context = None
+    ) -> Dict[str, Any]:
         """获取中国月度通胀指标 (CPI/PPI)."""
         if ctx:
-            await ctx.info("🔧 获取通胀指标")
+            await ctx.info("🔧 获取通胀指标", extra={"months": months})
 
         try:
-            logger.info("MCP tool called: get_inflation_data")
-            result = await money_flow_use_cases.get_inflation_data()
+            logger.info("MCP tool called: get_inflation_data", months=months)
+            result = await money_flow_use_cases.get_inflation_data(months)
             result["component_type"] = "inflation_data"
 
-            summary_text = "中国月度通胀指标：CPI、PPI 及价差（近 5 年）"
+            summary_text = f"中国月度通胀指标：CPI、PPI 及价差（近 {months} 个月）"
 
             data = result.get("data", {})
             cpi = data.get("CPI", []) if isinstance(data, dict) else []
             ppi = data.get("PPI", []) if isinstance(data, dict) else []
+            cpi = sorted(cpi, key=lambda x: str(x.get("month", "")))
+            ppi = sorted(ppi, key=lambda x: str(x.get("month", "")))
+            if months > 0:
+                cpi = cpi[-months:]
+                ppi = ppi[-months:]
             artifact = create_artifact_envelope(
                 component_type="inflation_data",
                 name="Inflation Data",
@@ -413,19 +417,22 @@ def register_money_flow_tools(mcp: FastMCP):
             return {"error": str(e), "component_type": "inflation_data"}
 
     @mcp.tool(tags={"money-flow"})
-    async def get_pmi_data(ctx: Context = None) -> Dict[str, Any]:
+    async def get_pmi_data(months: int = 60, ctx: Context = None) -> Dict[str, Any]:
         """获取中国官方 PMI 数据."""
         if ctx:
-            await ctx.info("🔧 获取 PMI")
+            await ctx.info("🔧 获取 PMI", extra={"months": months})
 
         try:
-            logger.info("MCP tool called: get_pmi_data")
-            result = await money_flow_use_cases.get_pmi_data()
+            logger.info("MCP tool called: get_pmi_data", months=months)
+            result = await money_flow_use_cases.get_pmi_data(months)
             result["component_type"] = "pmi_data"
 
-            summary_text = "中国官方 PMI：制造业/非制造业及分项（近 5 年）"
+            summary_text = f"中国官方 PMI：制造业/非制造业及分项（近 {months} 个月）"
 
-            content = result.get("data", [])
+            content = result.get("data", []) or []
+            content = sorted(content, key=lambda x: str(x.get("month", "")))
+            if months > 0:
+                content = content[-months:]
             artifact = create_artifact_envelope(
                 component_type="pmi_data",
                 name="PMI Data",
@@ -442,19 +449,22 @@ def register_money_flow_tools(mcp: FastMCP):
             return {"error": str(e), "component_type": "pmi_data"}
 
     @mcp.tool(tags={"money-flow"})
-    async def get_gdp_data(ctx: Context = None) -> Dict[str, Any]:
+    async def get_gdp_data(quarters: int = 20, ctx: Context = None) -> Dict[str, Any]:
         """获取中国季度 GDP 增长数据."""
         if ctx:
-            await ctx.info("🔧 获取 GDP")
+            await ctx.info("🔧 获取 GDP", extra={"quarters": quarters})
 
         try:
-            logger.info("MCP tool called: get_gdp_data")
-            result = await money_flow_use_cases.get_gdp_data()
+            logger.info("MCP tool called: get_gdp_data", quarters=quarters)
+            result = await money_flow_use_cases.get_gdp_data(quarters)
             result["component_type"] = "gdp_data"
 
-            summary_text = "中国季度 GDP 增长：总量与三产结构（近 5 年）"
+            summary_text = f"中国季度 GDP 增长：总量与三产结构（近 {quarters} 个季度）"
 
-            content = result.get("data", [])
+            content = result.get("data", []) or []
+            content = sorted(content, key=lambda x: str(x.get("quarter", "")))
+            if quarters > 0:
+                content = content[-quarters:]
             artifact = create_artifact_envelope(
                 component_type="gdp_data",
                 name="GDP Data",
@@ -471,14 +481,16 @@ def register_money_flow_tools(mcp: FastMCP):
             return {"error": str(e), "component_type": "gdp_data"}
 
     @mcp.tool(tags={"money-flow"})
-    async def get_social_financing(months: int = 60, ctx: Context = None) -> Dict[str, Any]:
+    async def get_social_financing(
+        months: int = 60, ctx: Context = None
+    ) -> Dict[str, Any]:
         """获取中国社会融资总量."""
         if ctx:
             await ctx.info("🔧 获取社会融资总量", extra={"months": months})
 
         try:
-            logger.info("MCP tool called: get_social_financing")
-            result = await money_flow_use_cases.get_social_financing()
+            logger.info("MCP tool called: get_social_financing", months=months)
+            result = await money_flow_use_cases.get_social_financing(months)
             result["component_type"] = "social_financing"
 
             summary_text = "China Total Social Financing (TSF): Aggregate Credit Demand, Monthly Increments & Stock Growth Trends - Last 5 Years"
@@ -519,11 +531,20 @@ def register_money_flow_tools(mcp: FastMCP):
     ) -> Dict[str, Any]:
         """获取中国利率数据 (SHIBOR + LPR)."""
         if ctx:
-            await ctx.info("🔧 获取利率数据", extra={"shibor_days": shibor_days, "lpr_months": lpr_months})
+            await ctx.info(
+                "🔧 获取利率数据",
+                extra={"shibor_days": shibor_days, "lpr_months": lpr_months},
+            )
 
         try:
-            logger.info("MCP tool called: get_interest_rates")
-            result = await money_flow_use_cases.get_interest_rates()
+            logger.info(
+                "MCP tool called: get_interest_rates",
+                shibor_days=shibor_days,
+                lpr_months=lpr_months,
+            )
+            result = await money_flow_use_cases.get_interest_rates(
+                shibor_days, lpr_months
+            )
             result["component_type"] = "interest_rates"
 
             summary_text = "中国利率：SHIBOR 期限结构 + LPR（shibor_lpr）"
@@ -532,7 +553,11 @@ def register_money_flow_tools(mcp: FastMCP):
             lpr = result.get("data", {}).get("lpr", []) or []
 
             shibor = sorted(shibor, key=lambda x: str(x.get("date", "")), reverse=True)
-            lpr = sorted(lpr, key=lambda x: str(x.get("date") or x.get("month", "")), reverse=True)
+            lpr = sorted(
+                lpr,
+                key=lambda x: str(x.get("date") or x.get("month", "")),
+                reverse=True,
+            )
 
             if shibor_days and shibor_days > 0:
                 shibor = shibor[:shibor_days]
@@ -579,7 +604,9 @@ def register_money_flow_tools(mcp: FastMCP):
                 ),
             ]
 
-            return create_artifact_list_response(summary=summary_text, artifacts=artifacts)
+            return create_artifact_list_response(
+                summary=summary_text, artifacts=artifacts
+            )
         except Exception as e:
             logger.error(f"Get interest rates failed: {e}", exc_info=True)
             if ctx:
@@ -587,7 +614,9 @@ def register_money_flow_tools(mcp: FastMCP):
             return {"error": str(e), "component_type": "interest_rates"}
 
     @mcp.tool(tags={"money-flow"})
-    async def get_market_liquidity(days: int = 60, ctx: Context = None) -> Dict[str, Any]:
+    async def get_market_liquidity(
+        days: int = 60, ctx: Context = None
+    ) -> Dict[str, Any]:
         """获取 A 股市场流动性指标."""
         if ctx:
             await ctx.info("🔧 获取市场流动性", extra={"days": days})
@@ -609,7 +638,10 @@ def register_money_flow_tools(mcp: FastMCP):
                     {
                         "name": "北向净流入",
                         "type": "line",
-                        "data": [{"x": r.get("trade_date"), "y": r.get("north_money")} for r in north_flow],
+                        "data": [
+                            {"x": r.get("trade_date"), "y": r.get("north_money")}
+                            for r in north_flow
+                        ],
                     }
                 ]
 
@@ -619,7 +651,10 @@ def register_money_flow_tools(mcp: FastMCP):
                     {
                         "name": "融资融券余额",
                         "type": "line",
-                        "data": [{"x": r.get("trade_date"), "y": r.get("rzrqye")} for r in margin],
+                        "data": [
+                            {"x": r.get("trade_date"), "y": r.get("rzrqye")}
+                            for r in margin
+                        ],
                     }
                 ]
 
@@ -648,7 +683,9 @@ def register_money_flow_tools(mcp: FastMCP):
                 ),
             ]
 
-            return create_artifact_list_response(summary=summary_text, artifacts=artifacts)
+            return create_artifact_list_response(
+                summary=summary_text, artifacts=artifacts
+            )
         except Exception as e:
             logger.error(f"Get market liquidity failed: {e}", exc_info=True)
             if ctx:
@@ -656,7 +693,9 @@ def register_money_flow_tools(mcp: FastMCP):
             return {"error": str(e), "component_type": "market_liquidity"}
 
     @mcp.tool(tags={"money-flow"})
-    async def get_market_money_flow(trade_date: str = None, ctx: Context = None) -> Dict[str, Any]:
+    async def get_market_money_flow(
+        trade_date: str = None, ctx: Context = None
+    ) -> Dict[str, Any]:
         """获取板块资金流向统计."""
         if ctx:
             await ctx.info("🔧 获取板块资金流向", extra={"trade_date": trade_date})
@@ -692,18 +731,28 @@ def register_money_flow_tools(mcp: FastMCP):
                     unit="",
                     x_label="板块",
                     y_label="净流入",
-                    series=[{
-                        "name": "净流入",
-                        "type": "bar",
-                        "data": [{"x": r.get("name") or r.get("industry"), "y": r.get("net_mf_amount") or r.get("net_amount")} for r in data],
-                    }],
+                    series=[
+                        {
+                            "name": "净流入",
+                            "type": "bar",
+                            "data": [
+                                {
+                                    "x": r.get("name") or r.get("industry"),
+                                    "y": r.get("net_mf_amount") or r.get("net_amount"),
+                                }
+                                for r in data
+                            ],
+                        }
+                    ],
                     description="板块资金流向分布",
                     metadata={"type": "chart", "dataset": "market_money_flow"},
                     name="Market Money Flow",
                 )
             ]
 
-            return create_artifact_list_response(summary=summary_text, artifacts=artifacts)
+            return create_artifact_list_response(
+                summary=summary_text, artifacts=artifacts
+            )
         except Exception as e:
             logger.error(f"Get market money flow failed: {e}", exc_info=True)
             if ctx:
@@ -711,17 +760,25 @@ def register_money_flow_tools(mcp: FastMCP):
             return {"error": str(e), "component_type": "market_money_flow"}
 
     @mcp.tool(tags={"money-flow"})
-    async def get_sector_trend(sector_name: str, days: int = 10, ctx: Context = None) -> Dict[str, Any]:
+    async def get_sector_trend(
+        sector_name: str, days: int = 10, ctx: Context = None
+    ) -> Dict[str, Any]:
         """获取板块近 N 天游势与累计涨跌幅."""
         if ctx:
-            await ctx.info("🔧 获取板块走势", extra={"sector_name": sector_name, "days": days})
+            await ctx.info(
+                "🔧 获取板块走势", extra={"sector_name": sector_name, "days": days}
+            )
 
         try:
-            logger.info("MCP tool called: get_sector_trend", sector_name=sector_name, days=days)
+            logger.info(
+                "MCP tool called: get_sector_trend", sector_name=sector_name, days=days
+            )
             result = await money_flow_use_cases.get_sector_trend(sector_name, days)
 
             total_pct = result.get("total_pct_chg", 0)
-            summary_text = f"{sector_name}板块走势（最近{days}天). 累计涨跌幅: {total_pct:+.2f}%."
+            summary_text = (
+                f"{sector_name}板块走势（最近{days}天). 累计涨跌幅: {total_pct:+.2f}%."
+            )
 
             artifact = create_artifact_envelope(
                 component_type="sector_trend",
@@ -786,3 +843,113 @@ def register_money_flow_tools(mcp: FastMCP):
             if ctx:
                 await ctx.error("❌ 获取港股通成交统计失败", extra={"error": str(e)})
             return {"error": str(e), "component_type": "ggt_daily"}
+
+    @mcp.tool(tags={"money-flow"})
+    async def get_sector_money_flow_history(
+        sector_name: str,
+        days: int = 20,
+        ctx: Context = None,
+    ) -> Dict[str, Any]:
+        """获取板块资金流向历史数据
+
+        查询指定行业板块近 N 个交易日的行情走势及主力/散户资金
+        净流入情况，帮助判断行业板块的资金动向和热度变化。
+
+        Args:
+            sector_name: 板块名称 (如 "白酒", "半导体", "新能源",
+                "光伏", "医药", "银行")
+            days: 获取最近 N 个交易日数据 (默认 20)
+            ctx: FastMCP Context for logging
+
+        Returns:
+            ArtifactEnvelope containing sector money flow history
+        """
+        if ctx:
+            await ctx.info(
+                f"🔧 获取板块资金流向: {sector_name}",
+                extra={"sector_name": sector_name, "days": days},
+            )
+
+        try:
+            logger.info(
+                "MCP tool called: get_sector_money_flow_history",
+                sector_name=sector_name,
+                days=days,
+            )
+            result = await money_flow_use_cases.get_sector_money_flow_history(
+                sector_name, days
+            )
+
+            if result.get("error"):
+                return {"error": result["error"]}
+
+            index_name = result.get("sector_name", sector_name)
+            index_code = result.get("index_code", "")
+            records = result.get("records", [])
+            summary_info = result.get("summary", {})
+            has_flow = result.get("has_money_flow", False)
+
+            # Build summary text
+            total_pct = summary_info.get("total_pct_chg", 0)
+            trend = summary_info.get("trend", "")
+            total_main = summary_info.get("total_main_net")
+
+            lines = [
+                f"{index_name}({index_code}) 板块资金流向 (近{len(records)}日):",
+                f"- 区间涨跌幅: {total_pct:.2f}%",
+            ]
+            if has_flow and total_main is not None:
+
+                def _fmt(val):
+                    if abs(val) >= 1e8:
+                        return f"{val / 1e8:.2f}亿"
+                    if abs(val) >= 1e4:
+                        return f"{val / 1e4:.2f}万"
+                    return f"{val:.0f}元"
+
+                lines.append(f"- 主力累计净流入: {_fmt(total_main)}")
+            lines.append(f"- 趋势: {trend}")
+            summary_text = "\n".join(lines)
+
+            # Build artifact
+            artifact = create_artifact_envelope(
+                component_type="sector_flow",
+                name=f"Sector Money Flow: {index_name}",
+                content={
+                    "sector_name": index_name,
+                    "index_code": index_code,
+                    "has_money_flow": has_flow,
+                    "records": records,
+                },
+                description=summary_text,
+                metadata={
+                    "type": "sector_flow",
+                    "sector_name": index_name,
+                    "index_code": index_code,
+                    "days": len(records),
+                },
+                visible_to_llm=False,
+                display_in_report=True,
+            )
+
+            if ctx:
+                await ctx.info(
+                    f"✅ 板块资金流向获取完成: {index_name}",
+                    extra={"days": len(records), "trend": trend},
+                )
+
+            return create_artifact_response(summary=summary_text, artifact=artifact)
+        except Exception as e:
+            logger.error(
+                f"Get sector money flow history failed: {e}",
+                exc_info=True,
+            )
+            if ctx:
+                await ctx.error(
+                    f"❌ 获取板块资金流向失败: {sector_name}",
+                    extra={"error": str(e)},
+                )
+            return {
+                "error": str(e),
+                "component_type": "sector_flow",
+            }

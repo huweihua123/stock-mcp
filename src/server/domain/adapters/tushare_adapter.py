@@ -347,7 +347,7 @@ class TushareAdapter(BaseDataAdapter):
                 client.daily_basic,
                 ts_code=ts_code,
                 fields="ts_code,trade_date,pe,pe_ttm,pb,ps,ps_ttm,dv_ratio,total_mv,circ_mv",
-                limit=1
+                limit=1,
             )
 
             # Helper function to convert DataFrame to serializable format
@@ -680,15 +680,18 @@ class TushareAdapter(BaseDataAdapter):
             self.logger.error(f"Failed to get chip data for {ticker}: {e}")
             raise ValueError(f"Failed to get chip data: {e}")
 
-    async def get_money_supply(self) -> Dict[str, Any]:
+    async def get_money_supply(self, months: int = 60) -> Dict[str, Any]:
         """获取货币供应量数据 (M1/M2)."""
         client = self.tushare_conn.get_client()
         if client is None:
             raise ValueError("Tushare client not available")
+        if months <= 0:
+            raise ValueError("months must be > 0")
 
-        end_m = datetime.now().strftime("%Y%m")
-        start_m = f"{datetime.now().year - 5}01"
-        cache_key = f"tushare:money_supply:{start_m}-{end_m}"
+        end_dt = datetime.now()
+        end_m = end_dt.strftime("%Y%m")
+        start_m = (end_dt - timedelta(days=months * 31)).strftime("%Y%m")
+        cache_key = f"tushare:money_supply:{start_m}-{end_m}:m{months}"
         cached = await self.cache.get(cache_key)
         if cached:
             return cached
@@ -696,7 +699,11 @@ class TushareAdapter(BaseDataAdapter):
         try:
             df = await self._run(client.cn_m, start_m=start_m, end_m=end_m)
             if df is None or df.empty:
-                return {"data": [], "component_type": "money_supply", "source": "tushare"}
+                return {
+                    "data": [],
+                    "component_type": "money_supply",
+                    "source": "tushare",
+                }
 
             df = df.sort_values("month")
             df = df.where(df.notnull(), None)
@@ -713,15 +720,18 @@ class TushareAdapter(BaseDataAdapter):
             self.logger.error(f"Failed to get money supply: {e}")
             raise ValueError(f"Failed to get money supply: {e}")
 
-    async def get_inflation_data(self) -> Dict[str, Any]:
+    async def get_inflation_data(self, months: int = 60) -> Dict[str, Any]:
         """获取通胀数据 (CPI/PPI)."""
         client = self.tushare_conn.get_client()
         if client is None:
             raise ValueError("Tushare client not available")
+        if months <= 0:
+            raise ValueError("months must be > 0")
 
-        end_m = datetime.now().strftime("%Y%m")
-        start_m = f"{datetime.now().year - 5}01"
-        cache_key = f"tushare:inflation:{start_m}-{end_m}"
+        end_dt = datetime.now()
+        end_m = end_dt.strftime("%Y%m")
+        start_m = (end_dt - timedelta(days=months * 31)).strftime("%Y%m")
+        cache_key = f"tushare:inflation:{start_m}-{end_m}:m{months}"
         cached = await self.cache.get(cache_key)
         if cached:
             return cached
@@ -734,8 +744,16 @@ class TushareAdapter(BaseDataAdapter):
                 "component_type": "inflation_data",
                 "source": "tushare",
                 "data": {
-                    "CPI": cpi_df.where(cpi_df.notnull(), None).to_dict("records") if cpi_df is not None else [],
-                    "PPI": ppi_df.where(ppi_df.notnull(), None).to_dict("records") if ppi_df is not None else [],
+                    "CPI": (
+                        cpi_df.where(cpi_df.notnull(), None).to_dict("records")
+                        if cpi_df is not None
+                        else []
+                    ),
+                    "PPI": (
+                        ppi_df.where(ppi_df.notnull(), None).to_dict("records")
+                        if ppi_df is not None
+                        else []
+                    ),
                 },
             }
             await self.cache.set(cache_key, result, ttl=3600)
@@ -744,15 +762,18 @@ class TushareAdapter(BaseDataAdapter):
             self.logger.error(f"Failed to get inflation data: {e}")
             raise ValueError(f"Failed to get inflation data: {e}")
 
-    async def get_pmi_data(self) -> Dict[str, Any]:
+    async def get_pmi_data(self, months: int = 60) -> Dict[str, Any]:
         """获取 PMI 数据."""
         client = self.tushare_conn.get_client()
         if client is None:
             raise ValueError("Tushare client not available")
+        if months <= 0:
+            raise ValueError("months must be > 0")
 
-        end_m = datetime.now().strftime("%Y%m")
-        start_m = f"{datetime.now().year - 5}01"
-        cache_key = f"tushare:pmi:{start_m}-{end_m}"
+        end_dt = datetime.now()
+        end_m = end_dt.strftime("%Y%m")
+        start_m = (end_dt - timedelta(days=months * 31)).strftime("%Y%m")
+        cache_key = f"tushare:pmi:{start_m}-{end_m}:m{months}"
         cached = await self.cache.get(cache_key)
         if cached:
             return cached
@@ -773,15 +794,22 @@ class TushareAdapter(BaseDataAdapter):
             self.logger.error(f"Failed to get PMI data: {e}")
             raise ValueError(f"Failed to get PMI data: {e}")
 
-    async def get_gdp_data(self) -> Dict[str, Any]:
+    async def get_gdp_data(self, quarters: int = 20) -> Dict[str, Any]:
         """获取 GDP 数据."""
         client = self.tushare_conn.get_client()
         if client is None:
             raise ValueError("Tushare client not available")
+        if quarters <= 0:
+            raise ValueError("quarters must be > 0")
 
-        start_q = f"{datetime.now().year - 5}Q1"
-        end_q = f"{datetime.now().year}Q4"
-        cache_key = f"tushare:gdp:{start_q}-{end_q}"
+        now = datetime.now()
+        current_q = (now.month - 1) // 3 + 1
+        start_index = (now.year * 4 + current_q) - (quarters - 1)
+        start_year = (start_index - 1) // 4
+        start_quarter = (start_index - 1) % 4 + 1
+        start_q = f"{start_year}Q{start_quarter}"
+        end_q = f"{now.year}Q{current_q}"
+        cache_key = f"tushare:gdp:{start_q}-{end_q}:q{quarters}"
         cached = await self.cache.get(cache_key)
         if cached:
             return cached
@@ -802,15 +830,18 @@ class TushareAdapter(BaseDataAdapter):
             self.logger.error(f"Failed to get GDP data: {e}")
             raise ValueError(f"Failed to get GDP data: {e}")
 
-    async def get_social_financing(self) -> Dict[str, Any]:
+    async def get_social_financing(self, months: int = 60) -> Dict[str, Any]:
         """获取社会融资数据."""
         client = self.tushare_conn.get_client()
         if client is None:
             raise ValueError("Tushare client not available")
+        if months <= 0:
+            raise ValueError("months must be > 0")
 
-        end_m = datetime.now().strftime("%Y%m")
-        start_m = f"{datetime.now().year - 5}01"
-        cache_key = f"tushare:social_financing:{start_m}-{end_m}"
+        end_dt = datetime.now()
+        end_m = end_dt.strftime("%Y%m")
+        start_m = (end_dt - timedelta(days=months * 31)).strftime("%Y%m")
+        cache_key = f"tushare:social_financing:{start_m}-{end_m}:m{months}"
         cached = await self.cache.get(cache_key)
         if cached:
             return cached
@@ -832,15 +863,19 @@ class TushareAdapter(BaseDataAdapter):
             self.logger.error(f"Failed to get social financing: {e}", exc_info=True)
             raise ValueError(f"Failed to get social financing: {e}")
 
-    async def get_interest_rates(self) -> Dict[str, Any]:
+    async def get_interest_rates(
+        self, shibor_days: int = 252, lpr_months: int = 60
+    ) -> Dict[str, Any]:
         """获取利率数据 (SHIBOR + LPR)."""
         client = self.tushare_conn.get_client()
         if client is None:
             raise ValueError("Tushare client not available")
+        if shibor_days <= 0:
+            raise ValueError("shibor_days must be > 0")
+        if lpr_months <= 0:
+            raise ValueError("lpr_months must be > 0")
 
-        end_m = datetime.now().strftime("%Y%m")
-        start_m = f"{datetime.now().year - 5}01"
-        cache_key = f"tushare:interest_rates:{start_m}-{end_m}"
+        cache_key = f"tushare:interest_rates:s{shibor_days}:l{lpr_months}"
         cached = await self.cache.get(cache_key)
         if cached:
             return cached
@@ -852,7 +887,9 @@ class TushareAdapter(BaseDataAdapter):
         try:
             shibor_df = await self._run(
                 client.shibor,
-                start_date=(datetime.now() - timedelta(days=370)).strftime("%Y%m%d"),
+                start_date=(datetime.now() - timedelta(days=shibor_days + 30)).strftime(
+                    "%Y%m%d"
+                ),
                 end_date=datetime.now().strftime("%Y%m%d"),
             )
         except Exception as e:
@@ -863,7 +900,9 @@ class TushareAdapter(BaseDataAdapter):
         try:
             lpr_df = await self._run(
                 client.shibor_lpr,
-                start_date=(datetime.now() - timedelta(days=5 * 365)).strftime("%Y%m%d"),
+                start_date=(
+                    datetime.now() - timedelta(days=lpr_months * 31 + 31)
+                ).strftime("%Y%m%d"),
                 end_date=datetime.now().strftime("%Y%m%d"),
             )
         except Exception as e:
@@ -871,14 +910,24 @@ class TushareAdapter(BaseDataAdapter):
             self.logger.error(f"Failed to get LPR (shibor_lpr): {e}")
 
         if shibor_df is None and lpr_df is None:
-            raise ValueError(f"Failed to get interest rates: {', '.join(errors) or 'unknown error'}")
+            raise ValueError(
+                f"Failed to get interest rates: {', '.join(errors) or 'unknown error'}"
+            )
 
         result = {
             "component_type": "interest_rates",
             "source": "tushare",
             "data": {
-                "shibor": shibor_df.where(shibor_df.notnull(), None).to_dict("records") if shibor_df is not None else [],
-                "lpr": lpr_df.where(lpr_df.notnull(), None).to_dict("records") if lpr_df is not None else [],
+                "shibor": (
+                    shibor_df.where(shibor_df.notnull(), None).to_dict("records")
+                    if shibor_df is not None
+                    else []
+                ),
+                "lpr": (
+                    lpr_df.where(lpr_df.notnull(), None).to_dict("records")
+                    if lpr_df is not None
+                    else []
+                ),
             },
         }
         if errors:
@@ -938,7 +987,9 @@ class TushareAdapter(BaseDataAdapter):
             self.logger.error(f"Failed to get market liquidity: {e}")
             raise ValueError(f"Failed to get market liquidity: {e}")
 
-    async def get_market_money_flow(self, trade_date: Optional[str] = None) -> Dict[str, Any]:
+    async def get_market_money_flow(
+        self, trade_date: Optional[str] = None
+    ) -> Dict[str, Any]:
         """获取市场资金流向数据."""
         cache_key = f"tushare:market_money_flow:{trade_date or 'latest'}"
         cached = await self.cache.get(cache_key)
@@ -960,7 +1011,9 @@ class TushareAdapter(BaseDataAdapter):
                 if df is None or df.empty:
                     df = await self._run(
                         client.moneyflow_mkt,
-                        trade_date=(datetime.now() - timedelta(days=1)).strftime("%Y%m%d"),
+                        trade_date=(datetime.now() - timedelta(days=1)).strftime(
+                            "%Y%m%d"
+                        ),
                     )
 
             data = []
@@ -978,7 +1031,9 @@ class TushareAdapter(BaseDataAdapter):
             self.logger.error(f"Failed to get market money flow: {e}")
             raise ValueError(f"Failed to get market money flow: {e}")
 
-    async def get_sector_trend(self, sector_name: str, days: int = 10) -> Dict[str, Any]:
+    async def get_sector_trend(
+        self, sector_name: str, days: int = 10
+    ) -> Dict[str, Any]:
         """获取板块走势数据."""
         cache_key = f"tushare:sector_trend:{sector_name}:{days}"
         cached = await self.cache.get(cache_key)
@@ -1014,7 +1069,11 @@ class TushareAdapter(BaseDataAdapter):
             daily_df = daily_df.sort_values("trade_date").tail(days)
             daily_df = daily_df.where(daily_df.notnull(), None)
             trend = daily_df.to_dict("records")
-            total_pct_chg = float(daily_df["pct_chg"].fillna(0).sum()) if "pct_chg" in daily_df else 0.0
+            total_pct_chg = (
+                float(daily_df["pct_chg"].fillna(0).sum())
+                if "pct_chg" in daily_df
+                else 0.0
+            )
 
             result = {
                 "component_type": "sector_trend",
@@ -1121,10 +1180,26 @@ class TushareAdapter(BaseDataAdapter):
                 "source": "tushare",
                 "ts_code": ts_code,
                 "data": {
-                    "top10_holders": holders_df.where(holders_df.notnull(), None).to_dict("records") if holders_df is not None else [],
-                    "top10_floatholders": float_df.where(float_df.notnull(), None).to_dict("records") if float_df is not None else [],
-                    "holder_number": number_df.where(number_df.notnull(), None).to_dict("records") if number_df is not None else [],
-                    "holder_trade": trade_df.where(trade_df.notnull(), None).to_dict("records") if trade_df is not None else [],
+                    "top10_holders": (
+                        holders_df.where(holders_df.notnull(), None).to_dict("records")
+                        if holders_df is not None
+                        else []
+                    ),
+                    "top10_floatholders": (
+                        float_df.where(float_df.notnull(), None).to_dict("records")
+                        if float_df is not None
+                        else []
+                    ),
+                    "holder_number": (
+                        number_df.where(number_df.notnull(), None).to_dict("records")
+                        if number_df is not None
+                        else []
+                    ),
+                    "holder_trade": (
+                        trade_df.where(trade_df.notnull(), None).to_dict("records")
+                        if trade_df is not None
+                        else []
+                    ),
                 },
             }
             await self.cache.set(cache_key, result, ttl=3600)
@@ -1132,6 +1207,385 @@ class TushareAdapter(BaseDataAdapter):
         except Exception as e:
             self.logger.error(f"Failed to get shareholder info: {e}")
             raise ValueError(f"Failed to get shareholder info: {e}")
+
+    async def get_valuation_metrics(
+        self, ticker: str, days: int = 250
+    ) -> Dict[str, Any]:
+        """获取估值指标数据 (PE/PB/PS/PCF + 历史百分位).
+
+        通过 daily_basic 接口拉取近 N 个交易日的数据，
+        计算当前值在历史区间中的百分位，帮助判断估值水平。
+
+        Args:
+            ticker: 股票代码 (内部格式 SSE:600519)
+            days: 拉取最近 N 个交易日数据 (默认 250，约一年)
+
+        Returns:
+            包含估值指标及百分位信息的结构化数据
+        """
+        ts_code = self._to_ts_code(ticker)
+        cache_key = f"tushare:valuation:{ts_code}:{days}"
+
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        client = self.tushare_conn.get_client()
+        if client is None:
+            raise ValueError("Tushare client not available")
+
+        try:
+            end_date = datetime.now()
+            # 多取一些天数以确保有足够交易日数据
+            start_date = end_date - timedelta(days=int(days * 1.6))
+
+            df = await self._run(
+                client.daily_basic,
+                ts_code=ts_code,
+                start_date=start_date.strftime("%Y%m%d"),
+                end_date=end_date.strftime("%Y%m%d"),
+                fields="ts_code,trade_date,pe,pe_ttm,pb,ps,ps_ttm,dv_ratio,dv_ttm,total_mv,circ_mv,turnover_rate,volume_ratio",
+            )
+
+            if df is None or df.empty:
+                return {
+                    "error": f"No valuation data for {ticker}",
+                    "symbol": ts_code,
+                    "source": "tushare",
+                }
+
+            df = df.sort_values("trade_date").tail(days)
+
+            # 将数值列转为 float
+            metric_cols = [
+                "pe",
+                "pe_ttm",
+                "pb",
+                "ps",
+                "ps_ttm",
+                "dv_ratio",
+                "dv_ttm",
+                "total_mv",
+                "circ_mv",
+                "turnover_rate",
+                "volume_ratio",
+            ]
+            for col in metric_cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
+
+            latest = df.iloc[-1]
+
+            def _percentile(series: pd.Series, current_value) -> float | None:
+                """计算 current_value 在 series 中的历史百分位 (0~100)."""
+                valid = series.dropna()
+                if valid.empty or pd.isna(current_value):
+                    return None
+                return round(float((valid < current_value).sum() / len(valid) * 100), 1)
+
+            def _safe_float(val) -> float | None:
+                if pd.isna(val):
+                    return None
+                return round(float(val), 4)
+
+            # 构建各指标的当前值 + 百分位
+            metrics = {}
+            for col in ["pe", "pe_ttm", "pb", "ps", "ps_ttm", "dv_ratio", "dv_ttm"]:
+                if col not in df.columns:
+                    continue
+                current = _safe_float(latest.get(col))
+                pct = _percentile(df[col], latest.get(col))
+                series_data = df[col].dropna()
+                metrics[col] = {
+                    "current": current,
+                    "percentile": pct,
+                    "min": (
+                        _safe_float(series_data.min())
+                        if not series_data.empty
+                        else None
+                    ),
+                    "max": (
+                        _safe_float(series_data.max())
+                        if not series_data.empty
+                        else None
+                    ),
+                    "mean": (
+                        _safe_float(series_data.mean())
+                        if not series_data.empty
+                        else None
+                    ),
+                    "median": (
+                        _safe_float(series_data.median())
+                        if not series_data.empty
+                        else None
+                    ),
+                }
+
+            # 市值信息
+            market_cap = {
+                "total_mv": _safe_float(latest.get("total_mv")),
+                "circ_mv": _safe_float(latest.get("circ_mv")),
+            }
+
+            # 历史序列 (用于图表)
+            dates = (
+                df["trade_date"].apply(lambda x: f"{x[:4]}-{x[4:6]}-{x[6:8]}").tolist()
+            )
+            history = {"dates": dates}
+            for col in ["pe_ttm", "pb", "ps_ttm"]:
+                if col in df.columns:
+                    history[col] = [_safe_float(v) for v in df[col].tolist()]
+
+            # 估值水平判断
+            pe_pct = metrics.get("pe_ttm", {}).get("percentile")
+            pb_pct = metrics.get("pb", {}).get("percentile")
+            avg_pct = None
+            pct_values = [v for v in [pe_pct, pb_pct] if v is not None]
+            if pct_values:
+                avg_pct = sum(pct_values) / len(pct_values)
+
+            if avg_pct is not None:
+                if avg_pct <= 20:
+                    level = "低估"
+                elif avg_pct <= 40:
+                    level = "偏低"
+                elif avg_pct <= 60:
+                    level = "适中"
+                elif avg_pct <= 80:
+                    level = "偏高"
+                else:
+                    level = "高估"
+            else:
+                level = "未知"
+
+            result = {
+                "symbol": ts_code,
+                "ticker": ticker,
+                "component_type": "valuation_metrics",
+                "source": "tushare",
+                "trade_date": str(latest.get("trade_date", "")),
+                "metrics": metrics,
+                "market_cap": market_cap,
+                "history": history,
+                "summary": {
+                    "valuation_level": level,
+                    "pe_ttm_percentile": pe_pct,
+                    "pb_percentile": pb_pct,
+                    "period_days": len(df),
+                },
+            }
+
+            await self.cache.set(cache_key, result, ttl=1800)
+            return result
+
+        except Exception as e:
+            self.logger.error(f"Failed to get valuation metrics for {ticker}: {e}")
+            raise ValueError(f"Failed to get valuation metrics: {e}")
+
+    async def get_sector_money_flow_history(
+        self, sector_name: str, days: int = 20
+    ) -> Dict[str, Any]:
+        """获取板块资金流向历史数据.
+
+        通过同花顺行业指数 (ths_index) 查找板块代码，
+        再用 ths_daily 获取含成交量/成交额的日线数据，
+        结合 moneyflow_ind (行业资金流向) 提供主力/散户资金净流入。
+
+        Args:
+            sector_name: 板块名称 (如 "白酒", "半导体", "新能源")
+            days: 获取最近 N 个交易日数据 (默认 20)
+
+        Returns:
+            包含板块资金流向历史数据的结构化字典
+        """
+        cache_key = f"tushare:sector_money_flow:{sector_name}:{days}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        client = self.tushare_conn.get_client()
+        if client is None:
+            raise ValueError("Tushare client not available")
+
+        try:
+            # Step 1: 查找板块指数代码
+            index_df = await self._run(client.ths_index, name=sector_name)
+            if index_df is None or index_df.empty:
+                return {
+                    "error": f"未找到板块: {sector_name}",
+                    "sector_name": sector_name,
+                    "source": "tushare",
+                }
+
+            index_code = index_df.iloc[0].get("ts_code")
+            index_name = index_df.iloc[0].get("name", sector_name)
+            if not index_code:
+                return {
+                    "error": f"板块 {sector_name} 无指数代码",
+                    "source": "tushare",
+                }
+
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=int(days * 1.6))
+
+            # Step 2: 获取板块日线行情 (ths_daily)
+            daily_df = await self._run(
+                client.ths_daily,
+                ts_code=index_code,
+                start_date=start_date.strftime("%Y%m%d"),
+                end_date=end_date.strftime("%Y%m%d"),
+            )
+
+            # Step 3: 尝试获取行业资金流向 (moneyflow_ind)
+            flow_df = None
+            try:
+                flow_df = await self._run(
+                    client.moneyflow_ind,
+                    ts_code=index_code,
+                    start_date=start_date.strftime("%Y%m%d"),
+                    end_date=end_date.strftime("%Y%m%d"),
+                )
+            except Exception as flow_err:
+                self.logger.warning(
+                    f"moneyflow_ind not available for {sector_name}: "
+                    f"{flow_err}, falling back to ths_daily only"
+                )
+
+            # 处理日线行情
+            records = []
+            if daily_df is not None and not daily_df.empty:
+                daily_df = daily_df.sort_values("trade_date").tail(days)
+                for col in [
+                    "close",
+                    "open",
+                    "high",
+                    "low",
+                    "pct_chg",
+                    "vol",
+                    "turnover_rate",
+                ]:
+                    if col in daily_df.columns:
+                        daily_df[col] = pd.to_numeric(daily_df[col], errors="coerce")
+
+                for _, row in daily_df.iterrows():
+                    td = str(row.get("trade_date", ""))
+                    rec = {
+                        "trade_date": td,
+                        "close": (
+                            float(row["close"]) if pd.notna(row.get("close")) else None
+                        ),
+                        "pct_chg": (
+                            float(row["pct_chg"])
+                            if pd.notna(row.get("pct_chg"))
+                            else None
+                        ),
+                        "vol": float(row["vol"]) if pd.notna(row.get("vol")) else None,
+                        "turnover_rate": (
+                            float(row["turnover_rate"])
+                            if pd.notna(row.get("turnover_rate"))
+                            else None
+                        ),
+                    }
+                    records.append(rec)
+
+            # 合并资金流向数据
+            if flow_df is not None and not flow_df.empty:
+                flow_df = flow_df.sort_values("trade_date").tail(days)
+                flow_map = {}
+                for _, row in flow_df.iterrows():
+                    td = str(row.get("trade_date", ""))
+                    flow_map[td] = {
+                        "buy_elg_amount": (
+                            float(row["buy_elg_amount"])
+                            if pd.notna(row.get("buy_elg_amount"))
+                            else 0
+                        ),
+                        "sell_elg_amount": (
+                            float(row["sell_elg_amount"])
+                            if pd.notna(row.get("sell_elg_amount"))
+                            else 0
+                        ),
+                        "buy_lg_amount": (
+                            float(row["buy_lg_amount"])
+                            if pd.notna(row.get("buy_lg_amount"))
+                            else 0
+                        ),
+                        "sell_lg_amount": (
+                            float(row["sell_lg_amount"])
+                            if pd.notna(row.get("sell_lg_amount"))
+                            else 0
+                        ),
+                        "buy_md_amount": (
+                            float(row["buy_md_amount"])
+                            if pd.notna(row.get("buy_md_amount"))
+                            else 0
+                        ),
+                        "sell_md_amount": (
+                            float(row["sell_md_amount"])
+                            if pd.notna(row.get("sell_md_amount"))
+                            else 0
+                        ),
+                        "buy_sm_amount": (
+                            float(row["buy_sm_amount"])
+                            if pd.notna(row.get("buy_sm_amount"))
+                            else 0
+                        ),
+                        "sell_sm_amount": (
+                            float(row["sell_sm_amount"])
+                            if pd.notna(row.get("sell_sm_amount"))
+                            else 0
+                        ),
+                    }
+                for rec in records:
+                    flow = flow_map.get(rec["trade_date"])
+                    if flow:
+                        main_buy = flow["buy_elg_amount"] + flow["buy_lg_amount"]
+                        main_sell = flow["sell_elg_amount"] + flow["sell_lg_amount"]
+                        retail_buy = flow["buy_md_amount"] + flow["buy_sm_amount"]
+                        retail_sell = flow["sell_md_amount"] + flow["sell_sm_amount"]
+                        rec["main_net_inflow"] = round(main_buy - main_sell, 2)
+                        rec["retail_net_inflow"] = round(retail_buy - retail_sell, 2)
+                        rec["total_net_inflow"] = round(
+                            rec["main_net_inflow"] + rec["retail_net_inflow"],
+                            2,
+                        )
+
+            # 汇总
+            has_flow = any("main_net_inflow" in r for r in records)
+            total_main = sum(r.get("main_net_inflow", 0) for r in records)
+            total_pct_chg = sum(r.get("pct_chg", 0) or 0 for r in records)
+
+            if has_flow:
+                if total_main > 0:
+                    trend = "主力资金持续流入"
+                else:
+                    trend = "主力资金持续流出"
+            else:
+                trend = "仅行情数据"
+
+            result = {
+                "component_type": "sector_money_flow",
+                "source": "tushare",
+                "sector_name": index_name,
+                "index_code": index_code,
+                "days": len(records),
+                "has_money_flow": has_flow,
+                "records": records,
+                "summary": {
+                    "total_pct_chg": round(total_pct_chg, 2),
+                    "total_main_net": (round(total_main, 2) if has_flow else None),
+                    "trend": trend,
+                },
+            }
+
+            await self.cache.set(cache_key, result, ttl=1800)
+            return result
+
+        except Exception as e:
+            self.logger.error(
+                f"Failed to get sector money flow for " f"{sector_name}: {e}"
+            )
+            raise ValueError(f"Failed to get sector money flow: {e}")
 
     async def get_technical_indicators(
         self,
@@ -1173,24 +1627,26 @@ class TushareAdapter(BaseDataAdapter):
         # Convert to DataFrame
         data = [p.to_dict() for p in prices]
         df = pd.DataFrame(data)
-        
+
         # Rename columns to match technical analysis expectations
-        df = df.rename(columns={
-            "close_price": "close",
-            "open_price": "open",
-            "high_price": "high",
-            "low_price": "low"
-        })
-        
+        df = df.rename(
+            columns={
+                "close_price": "close",
+                "open_price": "open",
+                "high_price": "high",
+                "low_price": "low",
+            }
+        )
+
         # Ensure numeric types
         for col in ["close", "high", "low", "open", "volume"]:
             df[col] = pd.to_numeric(df[col], errors="coerce")
-            
+
         df = df.sort_values("timestamp")
 
         # Ensure timestamp is datetime
         df["timestamp"] = pd.to_datetime(df["timestamp"])
-        
+
         result = {
             "dates": df["timestamp"].apply(lambda x: x.strftime("%Y-%m-%d")).tolist(),
             "close": df["close"].tolist(),
@@ -1201,6 +1657,7 @@ class TushareAdapter(BaseDataAdapter):
         }
 
         try:
+
             def _series_to_list(series: pd.Series) -> List[Optional[float]]:
                 return series.where(pd.notnull(series), None).tolist()
 
@@ -1220,11 +1677,11 @@ class TushareAdapter(BaseDataAdapter):
                 macd = exp12 - exp26
                 signal = macd.ewm(span=9, adjust=False).mean()
                 hist = (macd - signal) * 2
-                
+
                 result["indicators"]["macd"] = {
                     "diff": _series_to_list(macd),
                     "dea": _series_to_list(signal),
-                    "hist": _series_to_list(hist)
+                    "hist": _series_to_list(hist),
                 }
 
             # KDJ
@@ -1232,32 +1689,28 @@ class TushareAdapter(BaseDataAdapter):
                 low_min = df["low"].rolling(window=9).min()
                 high_max = df["high"].rolling(window=9).max()
                 rsv = (df["close"] - low_min) / (high_max - low_min) * 100
-                
+
                 # Use simple moving average for K and D as per common Chinese stock software
                 # K = 2/3 * PrevK + 1/3 * RSV
                 # D = 2/3 * PrevD + 1/3 * K
                 # J = 3 * K - 2 * D
-                
+
                 k_list = []
                 d_list = []
                 j_list = []
-                
+
                 k = 50
                 d = 50
-                
+
                 for r in rsv.fillna(50):
-                    k = (2/3) * k + (1/3) * r
-                    d = (2/3) * d + (1/3) * k
+                    k = (2 / 3) * k + (1 / 3) * r
+                    d = (2 / 3) * d + (1 / 3) * k
                     j = 3 * k - 2 * d
                     k_list.append(k)
                     d_list.append(d)
                     j_list.append(j)
-                    
-                result["indicators"]["kdj"] = {
-                    "k": k_list,
-                    "d": d_list,
-                    "j": j_list
-                }
+
+                result["indicators"]["kdj"] = {"k": k_list, "d": d_list, "j": j_list}
 
             # RSI
             if "RSI" in indicators:
@@ -1289,18 +1742,22 @@ class TushareAdapter(BaseDataAdapter):
                 kdj = result["indicators"].get("kdj", {})
                 rsi_list = result["indicators"].get("rsi", [])
 
-                row.update({
-                    "MA5": ma.get("ma5", [None] * len(df)).__getitem__(idx),
-                    "MA10": ma.get("ma10", [None] * len(df)).__getitem__(idx),
-                    "MA20": ma.get("ma20", [None] * len(df)).__getitem__(idx),
-                    "MA60": ma.get("ma60", [None] * len(df)).__getitem__(idx),
-                    "MACD": macd_ind.get("diff", [None] * len(df)).__getitem__(idx),
-                    "MACD_signal": macd_ind.get("dea", [None] * len(df)).__getitem__(idx),
-                    "RSI": rsi_list[idx] if idx < len(rsi_list) else None,
-                    "K": kdj.get("k", [None] * len(df)).__getitem__(idx),
-                    "D": kdj.get("d", [None] * len(df)).__getitem__(idx),
-                    "J": kdj.get("j", [None] * len(df)).__getitem__(idx),
-                })
+                row.update(
+                    {
+                        "MA5": ma.get("ma5", [None] * len(df)).__getitem__(idx),
+                        "MA10": ma.get("ma10", [None] * len(df)).__getitem__(idx),
+                        "MA20": ma.get("ma20", [None] * len(df)).__getitem__(idx),
+                        "MA60": ma.get("ma60", [None] * len(df)).__getitem__(idx),
+                        "MACD": macd_ind.get("diff", [None] * len(df)).__getitem__(idx),
+                        "MACD_signal": macd_ind.get(
+                            "dea", [None] * len(df)
+                        ).__getitem__(idx),
+                        "RSI": rsi_list[idx] if idx < len(rsi_list) else None,
+                        "K": kdj.get("k", [None] * len(df)).__getitem__(idx),
+                        "D": kdj.get("d", [None] * len(df)).__getitem__(idx),
+                        "J": kdj.get("j", [None] * len(df)).__getitem__(idx),
+                    }
+                )
                 rows.append(row)
 
             result["rows"] = rows

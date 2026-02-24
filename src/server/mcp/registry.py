@@ -37,7 +37,7 @@ TOOL_GROUPS: List[ToolGroup] = [
         register=register_fundamental_tools,
         enabled=True,
         description="基本面分析",
-        count=4,
+        count=5,
     ),
     ToolGroup(
         name="asset",
@@ -58,7 +58,7 @@ TOOL_GROUPS: List[ToolGroup] = [
         register=register_money_flow_tools,
         enabled=True,
         description="资金流向",
-        count=14,
+        count=15,
     ),
     ToolGroup(
         name="filings",
