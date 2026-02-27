@@ -316,17 +316,104 @@ class BaseDataAdapter(abc.ABC):
     async def get_sector_money_flow_history(
         self, sector_name: str, days: int = 20
     ) -> Dict[str, Any]:
-        """获取板块资金流向历史数据 (Optional).
-
-        Args:
-            sector_name: 板块名称
-            days: 获取最近 N 个交易日数据
-
-        Returns:
-            包含板块资金流向历史数据的字典
-        """
+        """获取板块资金流向历史数据 (Optional)."""
         raise NotImplementedError(
             f"{self.source.value} does not support " "get_sector_money_flow_history"
+        )
+
+    # =========================================================================
+    # US-market specific operations (Optional)
+    # =========================================================================
+
+    async def get_earnings_history(
+        self, ticker: str, quarters: int = 8
+    ) -> Dict[str, Any]:
+        """Fetch EPS history: estimate vs actual and surprise % (Optional).
+
+        Args:
+            ticker: Asset ticker in internal format (e.g. NASDAQ:AAPL)
+            quarters: Number of past quarters to return
+
+        Returns:
+            Dict with keys: ticker, quarters (list of {date, actual_eps,
+            estimated_eps, surprise_pct})
+        """
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_earnings_history"
+        )
+
+    async def get_cash_flow_quality(self, ticker: str) -> Dict[str, Any]:
+        """Fetch operating / free cash flow and FCF/net-income ratio (Optional).
+
+        Returns:
+            Dict with keys: ticker, annual (list of {year, operating_cf,
+            capex, free_cf, net_income, fcf_ratio})
+        """
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_cash_flow_quality"
+        )
+
+    async def get_us_valuation_metrics(self, ticker: str) -> Dict[str, Any]:
+        """Fetch US stock valuation: PE/PS/PB/EV_EBITDA (Optional).
+
+        Returns:
+            Dict with keys: ticker, pe_ttm, ps_ttm, pb, ev_ebitda,
+            market_cap, enterprise_value
+        """
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_us_valuation_metrics"
+        )
+
+    async def get_us_institutional_holdings(self, ticker: str) -> Dict[str, Any]:
+        """Fetch top institutional holders and recent change (Optional).
+
+        Returns:
+            Dict with keys: ticker, holders (list of {name, pct_held,
+            shares, change_pct, filing_date})
+        """
+        raise NotImplementedError(
+            f"{self.source.value} does not support " "get_us_institutional_holdings"
+        )
+
+    async def get_us_price_history(
+        self, ticker: str, days: int = 60, interval: str = "1d"
+    ) -> Dict[str, Any]:
+        """Fetch OHLCV klines for a US stock (Optional).
+
+        Returns:
+            Dict with keys: ticker, interval, bars (list of {date, open,
+            high, low, close, volume})
+        """
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_us_price_history"
+        )
+
+    async def get_us_volume_analysis(
+        self, ticker: str, days: int = 30
+    ) -> Dict[str, Any]:
+        """Fetch volume metrics: avg volume, relative volume, OBV (Optional).
+
+        Returns:
+            Dict with keys: ticker, avg_volume_20d, current_volume,
+            rvol, obv_trend, bars (list of {date, volume, rvol})
+        """
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_us_volume_analysis"
+        )
+
+    async def get_us_sector_etf_analysis(
+        self, sector_name: str, days: int = 30
+    ) -> Dict[str, Any]:
+        """Fetch US sector ETF klines by sector name (Optional).
+
+        Sector name is mapped to a representative ETF ticker internally.
+
+        Returns:
+            Dict with keys: sector_name, etf_ticker, bars (list of
+            {date, close, change_pct}), trend_summary
+        """
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_us_sector_etf_analysis"
         )
 
     async def get_technical_indicators(

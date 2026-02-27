@@ -20,6 +20,9 @@ from src.server.mcp.tools.filings_tools import register_filings_tools
 from src.server.mcp.tools.trade_tools import register_trade_tools
 from src.server.mcp.tools.chunking_tools import register_chunking_tools
 from src.server.mcp.tools.news_tools import register_news_tools
+from src.server.mcp.tools.us_fundamental_tools import register_us_fundamental_tools
+from src.server.mcp.tools.us_technical_tools import register_us_technical_tools
+from src.server.mcp.tools.us_sector_tools import register_us_sector_tools
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,28 @@ TOOL_GROUPS: List[ToolGroup] = [
         enabled=False,
         description="新闻与检索",
         count=2,
+    ),
+    # ---- 美股工具集 (ValueCell 竞品对齐) ----
+    ToolGroup(
+        name="us-fundamental",
+        register=register_us_fundamental_tools,
+        enabled=True,
+        description="美股基本面 (EPS历史/现金流/估值/机构持仓)",
+        count=4,
+    ),
+    ToolGroup(
+        name="us-technical",
+        register=register_us_technical_tools,
+        enabled=True,
+        description="美股技术分析 (指标/量价/K线/综合摘要)",
+        count=4,
+    ),
+    ToolGroup(
+        name="us-sector",
+        register=register_us_sector_tools,
+        enabled=True,
+        description="美股行业ETF分析",
+        count=1,
     ),
 ]
 

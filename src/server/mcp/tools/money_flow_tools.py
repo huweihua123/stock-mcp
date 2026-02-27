@@ -175,9 +175,14 @@ def register_money_flow_tools(mcp: FastMCP):
             result["component_type"] = "north_bound_flow"
 
             # 构建摘要
+            # moneyflow_hsgt 返回单位为万元，转换为亿元展示
             summary = result.get("summary", {})
             total_net = summary.get("total_net", 0)
-            amount_str = f"{total_net:.2f}亿" if total_net else "暂无数据"
+            if total_net:
+                total_net_yi = total_net / 10000  # 万元 → 亿元
+                amount_str = f"{total_net_yi:.2f}亿"
+            else:
+                amount_str = "暂无数据"
 
             summary_text = f"近{days}日北向资金简报:\n- 累计净流入: {amount_str}"
 
@@ -187,7 +192,7 @@ def register_money_flow_tools(mcp: FastMCP):
                 )
 
             artifact = create_artifact_envelope(
-                component_type="market_liquidity",
+                component_type="north_bound_flow",
                 name="北向资金流向",
                 content=result,
                 description=summary_text,
@@ -775,6 +780,30 @@ def register_money_flow_tools(mcp: FastMCP):
             )
             result = await money_flow_use_cases.get_sector_trend(sector_name, days)
 
+            # ── 候选列表：板块名称模糊匹配返回多个候选时 ──────────────────
+            if result.get("candidates"):
+                candidates: list = result["candidates"]
+                candidates_str = "、".join(candidates)
+                summary_text = (
+                    f'板块名称"{sector_name}"不明确，找到以下候选板块：{candidates_str}。'
+                    f"请用精确名称重新查询，例如直接使用上述某个名称。"
+                )
+                artifact = create_artifact_envelope(
+                    component_type="sector_trend",
+                    name=f"Sector Trend: {sector_name}",
+                    content={
+                        "sector_name": sector_name,
+                        "days": days,
+                        "candidates": candidates,
+                        "total_pct_chg": 0,
+                        "trend": [],
+                    },
+                    description=summary_text,
+                    metadata={"type": "sector_trend", "sector_name": sector_name},
+                    visible_to_llm=True,
+                )
+                return create_artifact_response(summary=summary_text, artifact=artifact)
+
             total_pct = result.get("total_pct_chg", 0)
             summary_text = (
                 f"{sector_name}板块走势（最近{days}天). 累计涨跌幅: {total_pct:+.2f}%."
@@ -880,8 +909,65 @@ def register_money_flow_tools(mcp: FastMCP):
                 sector_name, days
             )
 
+            # ── 候选列表：板块名称模糊匹配返回多个候选时 ──────────────────
+            if result.get("candidates"):
+                candidates: list = result["candidates"]
+                candidates_str = "、".join(candidates)
+                summary_text = (
+                    f'板块名称"{sector_name}"不明确，找到以下候选板块：{candidates_str}。'
+                    f"请用精确名称重新查询，例如直接使用上述某个名称。"
+                )
+                empty_artifact = create_artifact_envelope(
+                    component_type="sector_flow",
+                    name=f"Sector Money Flow: {sector_name}",
+                    content={
+                        "sector_name": sector_name,
+                        "index_code": "",
+                        "has_money_flow": False,
+                        "records": [],
+                        "candidates": candidates,
+                    },
+                    description=summary_text,
+                    metadata={"type": "sector_flow", "sector_name": sector_name},
+                    visible_to_llm=True,
+                )
+                return create_artifact_response(
+                    summary=summary_text,
+                    artifact=empty_artifact,
+                )
+
             if result.get("error"):
-                return {"error": result["error"]}
+                err_msg = result["error"]
+                # 如果 error 响应中同时携带了候选列表，拼入提示
+                candidates = result.get("candidates") or []
+                if candidates:
+                    candidates_str = "、".join(candidates)
+                    summary_text = (
+                        f'板块名称"{sector_name}"不明确，找到以下候选板块：{candidates_str}。'
+                        f"请用精确名称重新查询，例如直接使用上述某个名称。"
+                    )
+                else:
+                    summary_text = f"未找到板块数据: {err_msg}"
+                empty_artifact = create_artifact_envelope(
+                    component_type="sector_flow",
+                    name=f"Sector Money Flow: {sector_name}",
+                    content={
+                        "sector_name": sector_name,
+                        "index_code": "",
+                        "has_money_flow": False,
+                        "records": [],
+                        "error": err_msg,
+                        "candidates": candidates,
+                    },
+                    description=summary_text,
+                    metadata={"type": "sector_flow", "sector_name": sector_name},
+                    visible_to_llm=bool(candidates),
+                    display_in_report=True,
+                )
+                return create_artifact_response(
+                    summary=summary_text,
+                    artifact=empty_artifact,
+                )
 
             index_name = result.get("sector_name", sector_name)
             index_code = result.get("index_code", "")

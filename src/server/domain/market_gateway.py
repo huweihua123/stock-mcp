@@ -1,26 +1,95 @@
 # src/server/domain/market_gateway.py
-"""MarketGateway: symbol resolution + adapter routing wrapper."""
+"""MarketGateway: symbol resolution + adapter routing wrapper.
+
+Design (v2):
+- Explicit methods only for operations that need custom routing logic
+  (router delegation, multi-symbol batching, dual-kwarg signatures).
+- All other ticker-scoped / market-wide operations are handled via
+  __getattr__ + two declarative registries:
+    _TICKER_METHODS  – set of method names that take (raw_symbol, **kwargs)
+    _MARKET_METHODS  – set of method names that take (**kwargs), no symbol
+  Adding a new operation: add one line to the appropriate registry set.
+"""
 
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from src.server.domain.symbols.errors import SymbolResolutionError
 from src.server.domain.symbols.types import InstrumentRef, ResolutionStatus
-from src.server.utils.logger import logger
+from src.server.utils.logger import logger  # noqa: F401 – kept for subclass use
+
+# ---------------------------------------------------------------------------
+# Declarative routing registries
+# ---------------------------------------------------------------------------
+# ticker-scoped: gateway will resolve raw_symbol → ticker, then forward.
+# To add a new ticker-scoped operation, append its name here — that's it.
+_TICKER_METHODS: Set[str] = {
+    # core
+    "get_asset_info",
+    "get_financials",
+    "get_mainbz_info",
+    "get_shareholder_info",
+    "get_dividend_info",
+    "get_valuation_metrics",
+    "get_money_flow",
+    "get_chip_distribution",
+    "get_filings",
+    # US fundamental
+    "get_earnings_history",
+    "get_cash_flow_quality",
+    "get_us_valuation_metrics",
+    "get_us_institutional_holdings",
+    # US technical
+    "get_us_price_history",
+    "get_us_volume_analysis",
+}
+
+# market-wide: no symbol resolution needed, forward kwargs as-is.
+_MARKET_METHODS: Set[str] = {
+    "get_north_bound_flow",
+    "get_money_supply",
+    "get_inflation_data",
+    "get_pmi_data",
+    "get_gdp_data",
+    "get_social_financing",
+    "get_interest_rates",
+    "get_market_liquidity",
+    "get_market_money_flow",
+    "get_sector_trend",
+    "get_sector_money_flow_history",
+    "get_ggt_daily",
+    # US sector (market-wide, no symbol)
+    "get_us_sector_etf_analysis",
+}
 
 
 class MarketGateway:
+    """Unified gateway: symbol resolution + adapter routing.
+
+    Explicit async methods are kept **only** when they need special logic
+    (router delegation, batching, dual-signature handling).
+
+    Everything in _TICKER_METHODS / _MARKET_METHODS is handled by __getattr__
+    which synthesises a coroutine-returning callable on first attribute access
+    and caches it so subsequent calls pay zero overhead.
+    """
+
     def __init__(self, adapter_manager, symbol_resolver, market_router=None):
         self._adapter_manager = adapter_manager
         self._resolver = symbol_resolver
         self._router = market_router
+        # Cache synthesised bound methods to avoid rebuilding closures
+        self._method_cache: Dict[str, Any] = {}
 
     @property
     def adapters(self):
-        # Expose underlying adapters for legacy usage
         return getattr(self._adapter_manager, "adapters", {})
+
+    # ------------------------------------------------------------------
+    # Symbol resolution helpers
+    # ------------------------------------------------------------------
 
     async def resolve_ticker(self, raw_symbol: str) -> str:
         resolution = await self._resolver.resolve(raw_symbol)
@@ -77,6 +146,10 @@ class MarketGateway:
             raw=raw_symbol,
         )
 
+    # ------------------------------------------------------------------
+    # Explicit methods — kept because they have non-trivial routing logic
+    # ------------------------------------------------------------------
+
     async def get_real_time_price(self, raw_symbol: str):
         instrument = await self.resolve_instrument(raw_symbol)
         if self._router and hasattr(instrument, "normalized"):
@@ -87,10 +160,6 @@ class MarketGateway:
             else await self.resolve_ticker(raw_symbol)
         )
         return await self._adapter_manager.get_real_time_price(ticker)
-
-    async def get_asset_info(self, raw_symbol: str):
-        ticker = await self.resolve_ticker(raw_symbol)
-        return await self._adapter_manager.get_asset_info(ticker)
 
     async def get_historical_prices(
         self, raw_symbol: str, start_date, end_date, interval: str = "1d"
@@ -125,7 +194,6 @@ class MarketGateway:
                     results[raw] = {"error": e.to_dict()}
             return results
 
-        # Legacy batch path
         resolutions = await asyncio.gather(
             *[self._resolver.resolve(sym) for sym in raw_symbols],
             return_exceptions=True,
@@ -182,100 +250,9 @@ class MarketGateway:
 
         for raw, err in errors.items():
             results[raw] = err
-
         for raw in raw_symbols:
             results.setdefault(raw, None)
-
         return results
-
-    async def get_financials(self, raw_symbol: str) -> Dict[str, Any]:
-        ticker = await self.resolve_ticker(raw_symbol)
-        return await self._adapter_manager.get_financials(ticker)
-
-    async def get_mainbz_info(self, raw_symbol: str) -> Dict[str, Any]:
-        ticker = await self.resolve_ticker(raw_symbol)
-        return await self._adapter_manager.get_mainbz_info(ticker)
-
-    async def get_shareholder_info(self, raw_symbol: str) -> Dict[str, Any]:
-        ticker = await self.resolve_ticker(raw_symbol)
-        return await self._adapter_manager.get_shareholder_info(ticker)
-
-    async def get_dividend_info(self, raw_symbol: str) -> Dict[str, Any]:
-        ticker = await self.resolve_ticker(raw_symbol)
-        return await self._adapter_manager.get_dividend_info(ticker)
-
-    async def get_valuation_metrics(
-        self, raw_symbol: str, days: int = 250
-    ) -> Dict[str, Any]:
-        ticker = await self.resolve_ticker(raw_symbol)
-        return await self._adapter_manager.get_valuation_metrics(ticker, days)
-
-    async def get_money_flow(self, raw_symbol: str, days: int = 20) -> Dict[str, Any]:
-        ticker = await self.resolve_ticker(raw_symbol)
-        return await self._adapter_manager.get_money_flow(ticker, days)
-
-    async def get_north_bound_flow(self, days: int = 30) -> Dict[str, Any]:
-        return await self._adapter_manager.get_north_bound_flow(days)
-
-    async def get_chip_distribution(
-        self, raw_symbol: str, days: int = 30
-    ) -> Dict[str, Any]:
-        ticker = await self.resolve_ticker(raw_symbol)
-        return await self._adapter_manager.get_chip_distribution(ticker, days)
-
-    async def get_money_supply(self, months: int = 60) -> Dict[str, Any]:
-        return await self._adapter_manager.get_money_supply(months)
-
-    async def get_inflation_data(self, months: int = 60) -> Dict[str, Any]:
-        return await self._adapter_manager.get_inflation_data(months)
-
-    async def get_pmi_data(self, months: int = 60) -> Dict[str, Any]:
-        return await self._adapter_manager.get_pmi_data(months)
-
-    async def get_gdp_data(self, quarters: int = 20) -> Dict[str, Any]:
-        return await self._adapter_manager.get_gdp_data(quarters)
-
-    async def get_social_financing(self, months: int = 60) -> Dict[str, Any]:
-        return await self._adapter_manager.get_social_financing(months)
-
-    async def get_interest_rates(
-        self, shibor_days: int = 252, lpr_months: int = 60
-    ) -> Dict[str, Any]:
-        return await self._adapter_manager.get_interest_rates(shibor_days, lpr_months)
-
-    async def get_market_liquidity(self, days: int = 60) -> Dict[str, Any]:
-        return await self._adapter_manager.get_market_liquidity(days)
-
-    async def get_market_money_flow(self) -> Dict[str, Any]:
-        return await self._adapter_manager.get_market_money_flow()
-
-    async def get_sector_trend(
-        self, sector_name: str, days: int = 10
-    ) -> Dict[str, Any]:
-        return await self._adapter_manager.get_sector_trend(sector_name, days)
-
-    async def get_sector_money_flow_history(
-        self, sector_name: str, days: int = 20
-    ) -> Dict[str, Any]:
-        return await self._adapter_manager.get_sector_money_flow_history(
-            sector_name, days
-        )
-
-    async def get_ggt_daily(self, days: int = 60) -> Dict[str, Any]:
-        return await self._adapter_manager.get_ggt_daily(days)
-
-    async def get_filings(
-        self,
-        raw_symbol: str,
-        start_date=None,
-        end_date=None,
-        limit: int = 10,
-        filing_types: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
-        ticker = await self.resolve_ticker(raw_symbol)
-        return await self._adapter_manager.get_filings(
-            ticker, start_date, end_date, limit, filing_types
-        )
 
     async def get_technical_indicators(
         self,
@@ -287,11 +264,9 @@ class MarketGateway:
         *,
         ticker: str | None = None,
     ) -> Dict[str, Any]:
+        """Dual-signature: accepts raw_symbol or pre-resolved ticker kwarg."""
         if ticker:
-            if ":" in ticker:
-                resolved = ticker
-            else:
-                resolved = await self.resolve_ticker(ticker)
+            resolved = ticker if ":" in ticker else await self.resolve_ticker(ticker)
         else:
             if not raw_symbol:
                 raise ValueError("raw_symbol or ticker is required")
@@ -304,6 +279,42 @@ class MarketGateway:
             end_date=end_date,
         )
 
-    def __getattr__(self, item):
-        # Fallback to adapter manager for legacy access
-        return getattr(self._adapter_manager, item)
+    # ------------------------------------------------------------------
+    # __getattr__: synthesise ticker-scoped and market-wide methods
+    # ------------------------------------------------------------------
+
+    def __getattr__(self, item: str):
+        # Avoid infinite recursion on private/dunder attrs during __init__
+        if item.startswith("_"):
+            raise AttributeError(item)
+
+        # Return cached synthesised method if available
+        cache = object.__getattribute__(self, "_method_cache")
+        if item in cache:
+            return cache[item]
+
+        adapter_manager = object.__getattribute__(self, "_adapter_manager")
+
+        if item in _TICKER_METHODS:
+            # Synthesise: resolve raw_symbol → ticker, then forward to adapter_manager
+            async def _ticker_method(raw_symbol: str, **kwargs):
+                ticker = await self.resolve_ticker(raw_symbol)
+                return await getattr(adapter_manager, item)(ticker, **kwargs)
+
+            _ticker_method.__name__ = item
+            _ticker_method.__qualname__ = f"MarketGateway.{item}"
+            cache[item] = _ticker_method
+            return _ticker_method
+
+        if item in _MARKET_METHODS:
+            # Synthesise: forward positional and keyword args to adapter_manager
+            async def _market_method(*args, **kwargs):
+                return await getattr(adapter_manager, item)(*args, **kwargs)
+
+            _market_method.__name__ = item
+            _market_method.__qualname__ = f"MarketGateway.{item}"
+            cache[item] = _market_method
+            return _market_method
+
+        # Final fallback: pass-through to adapter_manager
+        return getattr(adapter_manager, item)

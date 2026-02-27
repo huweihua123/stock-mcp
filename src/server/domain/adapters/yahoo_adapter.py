@@ -49,8 +49,11 @@ class YahooAdapter(BaseDataAdapter):
                     f"✅ Yahoo adapter configured with proxy (yf.config.network.proxy): {self.proxy_url}"
                 )
             except Exception as e:
-                self.logger.warning(f"⚠️  Failed to set proxy via yf.config: {e}, trying env vars...")
+                self.logger.warning(
+                    f"⚠️  Failed to set proxy via yf.config: {e}, trying env vars..."
+                )
                 import os
+
                 os.environ["HTTP_PROXY"] = self.proxy_url
                 os.environ["HTTPS_PROXY"] = self.proxy_url
                 os.environ["http_proxy"] = self.proxy_url
@@ -79,12 +82,8 @@ class YahooAdapter(BaseDataAdapter):
             AdapterCapability(
                 asset_type=AssetType.INDEX, exchanges={Exchange.NASDAQ, Exchange.NYSE}
             ),
-            AdapterCapability(
-                asset_type=AssetType.CRYPTO, exchanges={Exchange.CRYPTO}
-            ),
-            AdapterCapability(
-                asset_type=AssetType.FX, exchanges={Exchange.FOREX}
-            ),
+            AdapterCapability(asset_type=AssetType.CRYPTO, exchanges={Exchange.CRYPTO}),
+            AdapterCapability(asset_type=AssetType.FX, exchanges={Exchange.FOREX}),
             AdapterCapability(
                 asset_type=AssetType.COMMODITY_SPOT, exchanges={Exchange.OTC}
             ),
@@ -108,15 +107,15 @@ class YahooAdapter(BaseDataAdapter):
 
     def convert_to_source_ticker(self, ticker: str) -> str:
         """Convert internal ticker to Yahoo Finance format.
-        
+
         Internal format: EXCHANGE:SYMBOL
         Yahoo format: SYMBOL.EXCHANGE_SUFFIX
         """
         if ":" not in ticker:
             return ticker
-            
+
         exchange, symbol = ticker.split(":", 1)
-        
+
         # Handle Crypto
         if exchange == "CRYPTO":
             # Convert BTC/USDT -> BTC-USD
@@ -145,11 +144,11 @@ class YahooAdapter(BaseDataAdapter):
         # Handle US stocks (no suffix)
         if exchange in ["NASDAQ", "NYSE", "AMEX", "US"]:
             return symbol
-            
+
         # Handle HK stocks
         if exchange == "HKEX":
             return f"{symbol}.HK"
-            
+
         # Handle A-shares
         if exchange == "SSE":  # Shanghai
             return f"{symbol}.SS"
@@ -334,7 +333,7 @@ class YahooAdapter(BaseDataAdapter):
 
         try:
             ticker_obj = await self._run(yf.Ticker, ticker_norm)
-            
+
             # Try fast_info first (more stable in yfinance 1.0)
             price = None
             currency = "USD"
@@ -344,25 +343,27 @@ class YahooAdapter(BaseDataAdapter):
             low_price = None
             close_price = None
             market_cap = None
-            
+
             try:
                 fast_info = await self._run(lambda: ticker_obj.fast_info)
                 if fast_info:
-                    price = getattr(fast_info, 'last_price', None)
-                    currency = getattr(fast_info, 'currency', 'USD') or 'USD'
-                    volume = getattr(fast_info, 'last_volume', 0) or 0
-                    open_price = getattr(fast_info, 'open', None)
-                    high_price = getattr(fast_info, 'day_high', None)
-                    low_price = getattr(fast_info, 'day_low', None)
-                    close_price = getattr(fast_info, 'previous_close', None)
-                    market_cap = getattr(fast_info, 'market_cap', None)
+                    price = getattr(fast_info, "last_price", None)
+                    currency = getattr(fast_info, "currency", "USD") or "USD"
+                    volume = getattr(fast_info, "last_volume", 0) or 0
+                    open_price = getattr(fast_info, "open", None)
+                    high_price = getattr(fast_info, "day_high", None)
+                    low_price = getattr(fast_info, "day_low", None)
+                    close_price = getattr(fast_info, "previous_close", None)
+                    market_cap = getattr(fast_info, "market_cap", None)
             except Exception as fast_info_error:
-                self.logger.debug(f"fast_info failed for {ticker}, trying info: {fast_info_error}")
-            
+                self.logger.debug(
+                    f"fast_info failed for {ticker}, trying info: {fast_info_error}"
+                )
+
             # Fallback to info if fast_info didn't get price
             if price is None:
                 info = await self._run(lambda: ticker_obj.info)
-                
+
                 # yfinance 1.0 may return string or None instead of dict
                 if info and isinstance(info, dict):
                     price = (
@@ -516,20 +517,20 @@ class YahooAdapter(BaseDataAdapter):
                 # Reset index to convert Timestamp index to column
                 df_reset = df.reset_index()
                 # Convert to dict with orient='records'
-                return df_reset.to_dict(orient='records')
-            
+                return df_reset.to_dict(orient="records")
+
             # Clean function to handle Timestamp and other non-serializable objects
             def clean_for_json(obj):
                 """Recursively clean object for JSON serialization."""
                 import math
                 from datetime import datetime
-                
+
                 if isinstance(obj, dict):
                     return {str(k): clean_for_json(v) for k, v in obj.items()}
                 elif isinstance(obj, list):
                     return [clean_for_json(item) for item in obj]
                 elif isinstance(obj, (pd.Timestamp, datetime)):
-                    return obj.isoformat() if hasattr(obj, 'isoformat') else str(obj)
+                    return obj.isoformat() if hasattr(obj, "isoformat") else str(obj)
                 elif isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
                     return None
                 elif isinstance(obj, (int, float, str, bool, type(None))):
@@ -539,7 +540,9 @@ class YahooAdapter(BaseDataAdapter):
 
             result = {
                 "balance_sheet": clean_for_json(df_to_serializable(balance_sheet)),
-                "income_statement": clean_for_json(df_to_serializable(income_statement)),
+                "income_statement": clean_for_json(
+                    df_to_serializable(income_statement)
+                ),
                 "cash_flow": clean_for_json(df_to_serializable(cash_flow)),
                 "financial_indicators": None,
                 "company_info": company_info,
@@ -552,3 +555,492 @@ class YahooAdapter(BaseDataAdapter):
         except Exception as e:
             self.logger.error(f"Failed to fetch financials for {ticker}: {e}")
             raise ValueError(f"Failed to fetch financials for {ticker}: {e}")
+
+    # =========================================================================
+    # US-market specific implementations
+    # =========================================================================
+
+    async def get_earnings_history(
+        self, ticker: str, quarters: int = 8
+    ) -> Dict[str, Any]:
+        """Fetch EPS history: estimate vs actual and surprise %."""
+        cache_key = f"yahoo:earnings:{ticker}:{quarters}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        ticker_norm = self._to_yf_ticker(ticker)
+        try:
+            ticker_obj = await self._run(yf.Ticker, ticker_norm)
+
+            def _fetch():
+                return ticker_obj.earnings_history
+
+            raw = await self._run(_fetch)
+            if raw is None or (hasattr(raw, "empty") and raw.empty):
+                return {"ticker": ticker, "quarters": []}
+
+            rows = []
+            df = raw.reset_index() if hasattr(raw, "reset_index") else raw
+            for _, row in df.iterrows():
+                actual = row.get("epsActual") or row.get("Reported EPS")
+                estimate = row.get("epsEstimate") or row.get("EPS Estimate")
+                surprise = row.get("surprisePercent") or row.get("Surprise(%)")
+                date_val = (
+                    row.get("Earnings Date") or row.get("Quarter") or row.get("index")
+                )
+                rows.append(
+                    {
+                        "date": str(date_val)[:10] if date_val is not None else None,
+                        "actual_eps": float(actual) if actual is not None else None,
+                        "estimated_eps": (
+                            float(estimate) if estimate is not None else None
+                        ),
+                        "surprise_pct": (
+                            float(surprise) if surprise is not None else None
+                        ),
+                    }
+                )
+            rows = rows[-quarters:]
+            result = {"ticker": ticker, "quarters": rows}
+            await self.cache.set(cache_key, result, ttl=3600)
+            return result
+        except Exception as e:
+            self.logger.error(f"get_earnings_history failed for {ticker}: {e}")
+            raise ValueError(f"get_earnings_history failed for {ticker}: {e}")
+
+    async def get_cash_flow_quality(self, ticker: str) -> Dict[str, Any]:
+        """Fetch operating/free cash flow and FCF/net-income ratio."""
+        cache_key = f"yahoo:cashflow:{ticker}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        ticker_norm = self._to_yf_ticker(ticker)
+        try:
+            ticker_obj = await self._run(yf.Ticker, ticker_norm)
+
+            def _fetch():
+                return ticker_obj.cashflow, ticker_obj.financials
+
+            cf_df, inc_df = await self._run(_fetch)
+
+            import math
+
+            def _safe(val):
+                if val is None:
+                    return None
+                try:
+                    v = float(val)
+                    return None if math.isnan(v) or math.isinf(v) else v
+                except Exception:
+                    return None
+
+            annual = []
+            if cf_df is not None and not cf_df.empty:
+                for col in cf_df.columns:
+                    year = str(col)[:4]
+                    op_cf = _safe(
+                        cf_df.loc["Operating Cash Flow", col]
+                        if "Operating Cash Flow" in cf_df.index
+                        else None
+                    )
+                    capex = _safe(
+                        cf_df.loc["Capital Expenditure", col]
+                        if "Capital Expenditure" in cf_df.index
+                        else None
+                    )
+                    free_cf = (op_cf or 0) + (capex or 0) if op_cf is not None else None
+                    net_inc = None
+                    if (
+                        inc_df is not None
+                        and not inc_df.empty
+                        and col in inc_df.columns
+                    ):
+                        net_inc = _safe(
+                            inc_df.loc["Net Income", col]
+                            if "Net Income" in inc_df.index
+                            else None
+                        )
+                    fcf_ratio = (
+                        (free_cf / net_inc)
+                        if (free_cf is not None and net_inc and net_inc != 0)
+                        else None
+                    )
+                    annual.append(
+                        {
+                            "year": year,
+                            "operating_cf": op_cf,
+                            "capex": capex,
+                            "free_cf": free_cf,
+                            "net_income": net_inc,
+                            "fcf_ratio": (
+                                round(fcf_ratio, 4) if fcf_ratio is not None else None
+                            ),
+                        }
+                    )
+
+            result = {"ticker": ticker, "annual": annual}
+            await self.cache.set(cache_key, result, ttl=3600)
+            return result
+        except Exception as e:
+            self.logger.error(f"get_cash_flow_quality failed for {ticker}: {e}")
+            raise ValueError(f"get_cash_flow_quality failed for {ticker}: {e}")
+
+    async def get_us_valuation_metrics(self, ticker: str) -> Dict[str, Any]:
+        """Fetch US stock valuation: PE/PS/PB/EV_EBITDA."""
+        cache_key = f"yahoo:us_val:{ticker}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        ticker_norm = self._to_yf_ticker(ticker)
+        try:
+            ticker_obj = await self._run(yf.Ticker, ticker_norm)
+            info = await self._run(lambda: ticker_obj.info)
+            if not info or not isinstance(info, dict):
+                raise ValueError(f"No info for {ticker}")
+
+            import math
+
+            def _safe(key):
+                v = info.get(key)
+                if v is None:
+                    return None
+                try:
+                    f = float(v)
+                    return None if math.isnan(f) or math.isinf(f) else f
+                except Exception:
+                    return None
+
+            result = {
+                "ticker": ticker,
+                "pe_ttm": _safe("trailingPE"),
+                "pe_forward": _safe("forwardPE"),
+                "ps_ttm": _safe("priceToSalesTrailing12Months"),
+                "pb": _safe("priceToBook"),
+                "ev_ebitda": _safe("enterpriseToEbitda"),
+                "peg_ratio": _safe("pegRatio"),
+                "market_cap": _safe("marketCap"),
+                "enterprise_value": _safe("enterpriseValue"),
+                "beta": _safe("beta"),
+                "dividend_yield": _safe("dividendYield"),
+                "name": info.get("longName") or info.get("shortName", ""),
+                "sector": info.get("sector", ""),
+                "industry": info.get("industry", ""),
+            }
+            await self.cache.set(cache_key, result, ttl=1800)
+            return result
+        except Exception as e:
+            self.logger.error(f"get_us_valuation_metrics failed for {ticker}: {e}")
+            raise ValueError(f"get_us_valuation_metrics failed for {ticker}: {e}")
+
+    async def get_us_institutional_holdings(self, ticker: str) -> Dict[str, Any]:
+        """Fetch top institutional holders and recent change."""
+        cache_key = f"yahoo:institutions:{ticker}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        ticker_norm = self._to_yf_ticker(ticker)
+        try:
+            ticker_obj = await self._run(yf.Ticker, ticker_norm)
+
+            def _fetch():
+                return ticker_obj.institutional_holders, ticker_obj.major_holders
+
+            inst_df, major_df = await self._run(_fetch)
+
+            holders = []
+            if inst_df is not None and not inst_df.empty:
+                for _, row in inst_df.head(15).iterrows():
+                    pct = row.get("pctHeld") or row.get("% Out")
+                    shares = row.get("Shares") or row.get("shares")
+                    change = row.get("Change") or row.get("change")
+                    date_filed = row.get("Date Reported") or row.get("dateReported")
+                    holders.append(
+                        {
+                            "name": str(row.get("Holder") or row.get("holder") or ""),
+                            "pct_held": (
+                                round(float(pct) * 100, 2) if pct is not None else None
+                            ),
+                            "shares": int(shares) if shares is not None else None,
+                            "change_pct": (
+                                round(float(change) * 100, 2)
+                                if change is not None
+                                else None
+                            ),
+                            "filing_date": (
+                                str(date_filed)[:10] if date_filed is not None else None
+                            ),
+                        }
+                    )
+
+            major = {}
+            if major_df is not None and not major_df.empty:
+                for _, row in major_df.iterrows():
+                    val = row.iloc[0] if len(row) > 0 else None
+                    label = row.iloc[1] if len(row) > 1 else None
+                    if label and val is not None:
+                        major[str(label)] = str(val)
+
+            result = {"ticker": ticker, "holders": holders, "major_holders": major}
+            await self.cache.set(cache_key, result, ttl=3600)
+            return result
+        except Exception as e:
+            self.logger.error(f"get_us_institutional_holdings failed for {ticker}: {e}")
+            raise ValueError(f"get_us_institutional_holdings failed for {ticker}: {e}")
+
+    async def get_us_price_history(
+        self, ticker: str, days: int = 60, interval: str = "1d"
+    ) -> Dict[str, Any]:
+        """Fetch OHLCV klines for a US stock."""
+        from datetime import timedelta
+
+        cache_key = f"yahoo:us_price_hist:{ticker}:{days}:{interval}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        ticker_norm = self._to_yf_ticker(ticker)
+        end = datetime.utcnow()
+        start = end - timedelta(days=days)
+        try:
+            ticker_obj = await self._run(yf.Ticker, ticker_norm)
+            hist = await self._run(
+                ticker_obj.history,
+                start=start.strftime("%Y-%m-%d"),
+                end=end.strftime("%Y-%m-%d"),
+                interval=interval,
+            )
+            if hist is None or (hasattr(hist, "empty") and hist.empty):
+                return {"ticker": ticker, "interval": interval, "bars": []}
+
+            bars = []
+            for idx, row in hist.iterrows():
+                bars.append(
+                    {
+                        "date": str(idx)[:10],
+                        "open": round(float(row["Open"]), 4),
+                        "high": round(float(row["High"]), 4),
+                        "low": round(float(row["Low"]), 4),
+                        "close": round(float(row["Close"]), 4),
+                        "volume": int(row["Volume"]),
+                    }
+                )
+            result = {"ticker": ticker, "interval": interval, "bars": bars}
+            await self.cache.set(cache_key, result, ttl=600)
+            return result
+        except Exception as e:
+            self.logger.error(f"get_us_price_history failed for {ticker}: {e}")
+            raise ValueError(f"get_us_price_history failed for {ticker}: {e}")
+
+    async def get_us_volume_analysis(
+        self, ticker: str, days: int = 30
+    ) -> Dict[str, Any]:
+        """Fetch volume metrics: avg volume, relative volume, OBV trend."""
+        from datetime import timedelta
+
+        cache_key = f"yahoo:us_vol:{ticker}:{days}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        ticker_norm = self._to_yf_ticker(ticker)
+        end = datetime.utcnow()
+        start = end - timedelta(days=max(days + 20, 60))  # extra days for avg
+        try:
+            ticker_obj = await self._run(yf.Ticker, ticker_norm)
+            hist = await self._run(
+                ticker_obj.history,
+                start=start.strftime("%Y-%m-%d"),
+                end=end.strftime("%Y-%m-%d"),
+                interval="1d",
+            )
+            if hist is None or (hasattr(hist, "empty") and hist.empty):
+                return {"ticker": ticker, "bars": []}
+
+            vols = hist["Volume"].values
+            avg_vol_20 = (
+                float(vols[-20:].mean()) if len(vols) >= 20 else float(vols.mean())
+            )
+            current_vol = float(vols[-1]) if len(vols) > 0 else 0.0
+            rvol = current_vol / avg_vol_20 if avg_vol_20 > 0 else None
+
+            # OBV
+            obv = 0.0
+            obv_series = []
+            closes = hist["Close"].values
+            for i in range(1, len(vols)):
+                if closes[i] > closes[i - 1]:
+                    obv += vols[i]
+                elif closes[i] < closes[i - 1]:
+                    obv -= vols[i]
+                obv_series.append(obv)
+            obv_trend = (
+                "up"
+                if (len(obv_series) >= 5 and obv_series[-1] > obv_series[-5])
+                else "down" if len(obv_series) >= 5 else "flat"
+            )
+
+            bars = []
+            hist_tail = hist.tail(days)
+            avg_20_rolling = (
+                float(hist["Volume"].rolling(20).mean().iloc[-1])
+                if len(hist) >= 20
+                else avg_vol_20
+            )
+            for idx, row in hist_tail.iterrows():
+                v = float(row["Volume"])
+                bars.append(
+                    {
+                        "date": str(idx)[:10],
+                        "volume": int(v),
+                        "rvol": (
+                            round(v / avg_20_rolling, 2) if avg_20_rolling > 0 else None
+                        ),
+                    }
+                )
+
+            result = {
+                "ticker": ticker,
+                "avg_volume_20d": round(avg_vol_20, 0),
+                "current_volume": round(current_vol, 0),
+                "rvol": round(rvol, 2) if rvol is not None else None,
+                "obv_trend": obv_trend,
+                "bars": bars,
+            }
+            await self.cache.set(cache_key, result, ttl=600)
+            return result
+        except Exception as e:
+            self.logger.error(f"get_us_volume_analysis failed for {ticker}: {e}")
+            raise ValueError(f"get_us_volume_analysis failed for {ticker}: {e}")
+
+    async def get_us_sector_etf_analysis(
+        self, sector_name: str, days: int = 30
+    ) -> Dict[str, Any]:
+        """Fetch US sector ETF klines by sector name."""
+        from datetime import timedelta
+
+        # Sector → ETF ticker mapping
+        SECTOR_ETF_MAP: Dict[str, str] = {
+            "technology": "XLK",
+            "tech": "XLK",
+            "科技": "XLK",
+            "financials": "XLF",
+            "finance": "XLF",
+            "金融": "XLF",
+            "healthcare": "XLV",
+            "health": "XLV",
+            "医疗": "XLV",
+            "医疗保健": "XLV",
+            "energy": "XLE",
+            "能源": "XLE",
+            "consumer discretionary": "XLY",
+            "consumer staples": "XLP",
+            "consumer": "XLY",
+            "消费": "XLY",
+            "日常消费": "XLP",
+            "utilities": "XLU",
+            "公用事业": "XLU",
+            "industrials": "XLI",
+            "industrial": "XLI",
+            "工业": "XLI",
+            "materials": "XLB",
+            "材料": "XLB",
+            "real estate": "XLRE",
+            "realestate": "XLRE",
+            "房地产": "XLRE",
+            "communication": "XLC",
+            "communications": "XLC",
+            "通信": "XLC",
+            "semiconductor": "SOXX",
+            "semiconductors": "SOXX",
+            "半导体": "SOXX",
+            "biotech": "XBI",
+            "biotechnology": "XBI",
+            "生物技术": "XBI",
+            "software": "IGV",
+            "软件": "IGV",
+            "cloud": "SKYY",
+            "云计算": "SKYY",
+            "ev": "DRIV",
+            "electric vehicle": "DRIV",
+            "新能源车": "DRIV",
+            "cybersecurity": "HACK",
+            "网络安全": "HACK",
+            "ai": "AIQ",
+            "人工智能": "AIQ",
+        }
+
+        key = sector_name.strip().lower()
+        etf_ticker = SECTOR_ETF_MAP.get(key)
+        if not etf_ticker:
+            # Fuzzy: try partial match
+            for k, v in SECTOR_ETF_MAP.items():
+                if k in key or key in k:
+                    etf_ticker = v
+                    break
+        if not etf_ticker:
+            etf_ticker = "SPY"  # fallback to S&P500
+
+        cache_key = f"yahoo:sector_etf:{etf_ticker}:{days}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            cached["sector_name"] = sector_name
+            return cached
+
+        end = datetime.utcnow()
+        start = end - timedelta(days=days + 5)
+        try:
+            ticker_obj = await self._run(yf.Ticker, etf_ticker)
+            hist = await self._run(
+                ticker_obj.history,
+                start=start.strftime("%Y-%m-%d"),
+                end=end.strftime("%Y-%m-%d"),
+                interval="1d",
+            )
+            if hist is None or (hasattr(hist, "empty") and hist.empty):
+                return {
+                    "sector_name": sector_name,
+                    "etf_ticker": etf_ticker,
+                    "bars": [],
+                    "trend_summary": "no data",
+                }
+
+            bars = []
+            closes = []
+            for idx, row in hist.tail(days).iterrows():
+                c = float(row["Close"])
+                closes.append(c)
+                bars.append(
+                    {"date": str(idx)[:10], "close": round(c, 4), "change_pct": None}
+                )
+
+            # Fill change_pct
+            for i in range(1, len(bars)):
+                prev = closes[i - 1]
+                if prev > 0:
+                    bars[i]["change_pct"] = round((closes[i] - prev) / prev * 100, 2)
+
+            total_chg = (
+                ((closes[-1] - closes[0]) / closes[0] * 100) if closes[0] > 0 else 0
+            )
+            trend_summary = f"{etf_ticker} {days}d return: {total_chg:+.2f}%"
+
+            result = {
+                "sector_name": sector_name,
+                "etf_ticker": etf_ticker,
+                "bars": bars,
+                "trend_summary": trend_summary,
+                "total_change_pct": round(total_chg, 2),
+            }
+            await self.cache.set(cache_key, result, ttl=600)
+            return result
+        except Exception as e:
+            self.logger.error(
+                f"get_us_sector_etf_analysis failed for {sector_name}: {e}"
+            )
+            raise ValueError(
+                f"get_us_sector_etf_analysis failed for {sector_name}: {e}"
+            )

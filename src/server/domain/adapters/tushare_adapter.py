@@ -6,9 +6,12 @@ the event loop non‑blocking.
 """
 
 import asyncio
+import sqlite3
+import time
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 
 from src.server.domain.adapters.base import BaseDataAdapter
@@ -28,11 +31,18 @@ from src.server.utils.logger import logger
 class TushareAdapter(BaseDataAdapter):
     name = "tushare"
 
+    # L1 进程内存缓存：{ts_code: str -> name: str}，带 TTL
+    _sector_index_cache: Dict[str, Any] = {}  # {"data": [...], "ts": float}
+
     def __init__(self, tushare_conn, cache):
         super().__init__(DataSource.TUSHARE)
         self.tushare_conn = tushare_conn
         self.cache = cache
         self.logger = logger
+        # SQLite L3 缓存文件路径（与 security_master.sqlite 同目录）
+        self._sqlite_path: str = str(
+            Path(__file__).resolve().parents[4] / "data" / "security_master.sqlite"
+        )
 
     def get_capabilities(self) -> List[AdapterCapability]:
         """Declare Tushare's capabilities."""
@@ -461,11 +471,31 @@ class TushareAdapter(BaseDataAdapter):
             )
 
             if df is None or df.empty:
-                return {
-                    "error": f"No money flow data for {ticker}",
+                self.logger.warning(
+                    f"moneyflow returned empty for {ticker} "
+                    f"(积分不足或该期无数据)，返回空 records"
+                )
+                result = {
                     "symbol": ts_code,
+                    "ticker": ticker,
+                    "component_type": "money_flow",
                     "source": "tushare",
+                    "records": [],
+                    "data": {
+                        "dates": [],
+                        "main_net_inflow": [],
+                        "retail_net_inflow": [],
+                        "total_net_inflow": [],
+                    },
+                    "summary": {
+                        "total_main_net": 0,
+                        "total_retail_net": 0,
+                        "trend": "暂无数据（接口积分不足或该时段无数据）",
+                        "period_days": 0,
+                    },
                 }
+                await self.cache.set(cache_key, result, ttl=300)
+                return result
 
             df = df.sort_values("trade_date").tail(days)
 
@@ -956,8 +986,10 @@ class TushareAdapter(BaseDataAdapter):
                 start_date=start_date.strftime("%Y%m%d"),
                 end_date=end_date.strftime("%Y%m%d"),
             )
+            # margin: 市场融资融券汇总时间序列（按日聚合）
+            # margin_detail 是个股截面，x轴全为同一日期，此处不适用
             margin_df = await self._run(
-                client.margin_detail,
+                client.margin,
                 start_date=start_date.strftime("%Y%m%d"),
                 end_date=end_date.strftime("%Y%m%d"),
             )
@@ -969,6 +1001,16 @@ class TushareAdapter(BaseDataAdapter):
 
             margin = []
             if margin_df is not None and not margin_df.empty:
+                # margin 接口按交易所分行（SSE/SZSE），需按日期聚合求和
+                agg_cols = {
+                    c: "sum"
+                    for c in ["rzye", "rqye", "rzrqye", "rzmre", "rqmcl", "rzrqjyzl"]
+                    if c in margin_df.columns
+                }
+                if agg_cols:
+                    margin_df = margin_df.groupby("trade_date", as_index=False).agg(
+                        agg_cols
+                    )
                 margin_df = margin_df.sort_values("trade_date").tail(days)
                 margin = margin_df.where(margin_df.notnull(), None).to_dict("records")
 
@@ -1000,21 +1042,30 @@ class TushareAdapter(BaseDataAdapter):
         if client is None:
             raise ValueError("Tushare client not available")
 
-        try:
-            if trade_date:
-                df = await self._run(client.moneyflow_mkt, trade_date=trade_date)
-            else:
-                df = await self._run(
-                    client.moneyflow_mkt,
-                    trade_date=datetime.now().strftime("%Y%m%d"),
+        async def _fetch_moneyflow_mkt(dt: str):
+            """先尝试 moneyflow_mkt，失败则降级到 moneyflow_ind_dc。"""
+            try:
+                df = await self._run(client.moneyflow_mkt, trade_date=dt)
+                if df is not None and not df.empty:
+                    return df
+            except Exception as e1:
+                self.logger.warning(
+                    f"moneyflow_mkt failed ({e1}), " f"falling back to moneyflow_ind_dc"
                 )
-                if df is None or df.empty:
-                    df = await self._run(
-                        client.moneyflow_mkt,
-                        trade_date=(datetime.now() - timedelta(days=1)).strftime(
-                            "%Y%m%d"
-                        ),
-                    )
+            # 降级：用行业资金流向汇总代替
+            try:
+                df = await self._run(client.moneyflow_ind_dc, trade_date=dt)
+                return df
+            except Exception as e2:
+                self.logger.warning(f"moneyflow_ind_dc also failed: {e2}")
+            return None
+
+        try:
+            target_date = trade_date or datetime.now().strftime("%Y%m%d")
+            df = await _fetch_moneyflow_mkt(target_date)
+            if (df is None or df.empty) and not trade_date:
+                yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+                df = await _fetch_moneyflow_mkt(yesterday)
 
             data = []
             if df is not None and not df.empty:
@@ -1031,10 +1082,174 @@ class TushareAdapter(BaseDataAdapter):
             self.logger.error(f"Failed to get market money flow: {e}")
             raise ValueError(f"Failed to get market money flow: {e}")
 
+    # ------------------------------------------------------------------
+    # 方案C：三级缓存 + 模糊匹配板块名称
+    # ------------------------------------------------------------------
+
+    def _get_sqlite_conn(self) -> sqlite3.Connection:
+        """返回 SQLite 连接并确保 ths_sector_index 表存在。"""
+        Path(self._sqlite_path).parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(self._sqlite_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ths_sector_index (
+                ts_code TEXT PRIMARY KEY,
+                name    TEXT NOT NULL,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.commit()
+        return conn
+
+    async def _get_all_sectors(self) -> List[Dict[str, str]]:
+        """获取全量板块列表，三级缓存：L1内存(1h) → L2 Redis(6h) → L3 SQLite → Tushare API.
+
+        Returns:
+            [{"ts_code": "...", "name": "..."}, ...]
+        """
+        _L1_TTL = 3600  # 1小时
+
+        # --- L1 进程内存 ---
+        cached = TushareAdapter._sector_index_cache
+        if cached and time.time() - cached.get("ts", 0) < _L1_TTL:
+            return cached["data"]
+
+        # --- L2 Redis ---
+        redis_key = "tushare:all_sectors:v1"
+        redis_data = await self.cache.get(redis_key)
+        if redis_data:
+            TushareAdapter._sector_index_cache = {
+                "data": redis_data,
+                "ts": time.time(),
+            }
+            return redis_data
+
+        # --- L3 SQLite ---
+        try:
+            conn = self._get_sqlite_conn()
+            rows = conn.execute(
+                "SELECT ts_code, name FROM ths_sector_index ORDER BY name"
+            ).fetchall()
+            conn.close()
+            if rows:
+                sqlite_data = [dict(r) for r in rows]
+                TushareAdapter._sector_index_cache = {
+                    "data": sqlite_data,
+                    "ts": time.time(),
+                }
+                await self.cache.set(redis_key, sqlite_data, ttl=21600)
+                return sqlite_data
+        except Exception as e:
+            self.logger.warning(f"SQLite sector cache read failed: {e}")
+
+        # --- Tushare API ---
+        client = self.tushare_conn.get_client()
+        if client is None:
+            return []
+
+        try:
+            df = await self._run(client.ths_index, exchange="A")
+            if df is None or df.empty:
+                # 部分 token 不传 exchange 才能拉全量
+                df = await self._run(client.ths_index)
+            if df is None or df.empty:
+                return []
+
+            df = df[["ts_code", "name"]].drop_duplicates(subset=["ts_code"])
+            api_data: List[Dict[str, str]] = df.to_dict("records")
+
+            # 回写 SQLite
+            try:
+                conn = self._get_sqlite_conn()
+                conn.executemany(
+                    """
+                    INSERT OR REPLACE INTO ths_sector_index(ts_code, name, updated_at)
+                    VALUES (?, ?, datetime('now'))
+                    """,
+                    [(r["ts_code"], r["name"]) for r in api_data],
+                )
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                self.logger.warning(f"SQLite sector cache write failed: {e}")
+
+            # 回写 Redis L2
+            await self.cache.set(redis_key, api_data, ttl=21600)
+
+            # 更新 L1
+            TushareAdapter._sector_index_cache = {
+                "data": api_data,
+                "ts": time.time(),
+            }
+            return api_data
+        except Exception as e:
+            self.logger.warning(f"Tushare ths_index full fetch failed: {e}")
+            return []
+
+    async def _resolve_sector_index(
+        self, sector_name: str
+    ) -> Tuple[Optional[str], Optional[str], Optional[List[str]]]:
+        """将板块名称解析为 (ts_code, matched_name, candidates).
+
+        解析顺序：
+          1. 精确匹配（等于）
+          2. 子串匹配（sector_name in name）
+          3. 反向子串匹配（name in sector_name 且 len>=2）
+        若找到唯一匹配，返回 (ts_code, name, None)；
+        若找到多个或零个，返回 (None, None, candidates_list)。
+        """
+        # 先尝试直接精确查询（快路径，保持向后兼容）
+        client = self.tushare_conn.get_client()
+        if client is not None:
+            try:
+                df = await self._run(client.ths_index, name=sector_name)
+                if df is not None and not df.empty:
+                    code = df.iloc[0].get("ts_code")
+                    name = df.iloc[0].get("name", sector_name)
+                    if code:
+                        return code, name, None
+            except Exception:
+                pass
+
+        # 从全量列表模糊匹配
+        all_sectors = await self._get_all_sectors()
+        if not all_sectors:
+            return None, None, None
+
+        # 1. 精确匹配
+        exact = [s for s in all_sectors if s["name"] == sector_name]
+        if len(exact) == 1:
+            return exact[0]["ts_code"], exact[0]["name"], None
+        if len(exact) > 1:
+            return exact[0]["ts_code"], exact[0]["name"], None
+
+        # 2. 子串匹配（sector_name 是候选名称的子串）
+        substr = [s for s in all_sectors if sector_name in s["name"]]
+        if len(substr) == 1:
+            return substr[0]["ts_code"], substr[0]["name"], None
+        if len(substr) > 1:
+            # 返回候选列表，让调用方决定
+            return None, None, [s["name"] for s in substr[:10]]
+
+        # 3. 反向子串（name 是 sector_name 的子串，且 name 长度>=2）
+        rev = [
+            s for s in all_sectors if len(s["name"]) >= 2 and s["name"] in sector_name
+        ]
+        if len(rev) == 1:
+            return rev[0]["ts_code"], rev[0]["name"], None
+        if len(rev) > 1:
+            # 取名称最长的（最具体）
+            rev_sorted = sorted(rev, key=lambda s: len(s["name"]), reverse=True)
+            return rev_sorted[0]["ts_code"], rev_sorted[0]["name"], None
+
+        return None, None, None
+
     async def get_sector_trend(
         self, sector_name: str, days: int = 10
     ) -> Dict[str, Any]:
-        """获取板块走势数据."""
+        """获取板块走势数据（支持模糊匹配板块名称）."""
         cache_key = f"tushare:sector_trend:{sector_name}:{days}"
         cached = await self.cache.get(cache_key)
         if cached:
@@ -1045,14 +1260,23 @@ class TushareAdapter(BaseDataAdapter):
             raise ValueError("Tushare client not available")
 
         try:
-            index_df = await self._run(client.ths_index, name=sector_name)
-            if index_df is None or index_df.empty:
-                raise ValueError(f"No sector index found for {sector_name}")
+            # 方案C：使用三级缓存 + 模糊匹配解析板块
+            index_code, matched_name, candidates = await self._resolve_sector_index(
+                sector_name
+            )
 
-            index_code = index_df.iloc[0].get("ts_code")
-            if not index_code:
-                raise ValueError(f"No ts_code for sector {sector_name}")
+            if index_code is None:
+                if candidates:
+                    return {
+                        "error": f"板块名称 '{sector_name}' 不明确，请从以下候选中选择",
+                        "candidates": candidates,
+                        "sector_name": sector_name,
+                        "component_type": "sector_trend",
+                        "source": "tushare",
+                    }
+                raise ValueError(f"No sector index found for '{sector_name}'")
 
+            display_name = matched_name or sector_name
             end_date = datetime.now()
             start_date = end_date - timedelta(days=days + 10)
 
@@ -1064,9 +1288,12 @@ class TushareAdapter(BaseDataAdapter):
             )
 
             if daily_df is None or daily_df.empty:
-                raise ValueError(f"No sector daily data for {sector_name}")
+                raise ValueError(f"No sector daily data for {display_name}")
 
             daily_df = daily_df.sort_values("trade_date").tail(days)
+            # ths_daily 部分版本返回 pct_change，统一归一化到 pct_chg
+            if "pct_change" in daily_df.columns and "pct_chg" not in daily_df.columns:
+                daily_df = daily_df.rename(columns={"pct_change": "pct_chg"})
             daily_df = daily_df.where(daily_df.notnull(), None)
             trend = daily_df.to_dict("records")
             total_pct_chg = (
@@ -1078,7 +1305,7 @@ class TushareAdapter(BaseDataAdapter):
             result = {
                 "component_type": "sector_trend",
                 "source": "tushare",
-                "sector_name": sector_name,
+                "sector_name": display_name,
                 "days": days,
                 "total_pct_chg": total_pct_chg,
                 "trend": trend,
@@ -1385,7 +1612,7 @@ class TushareAdapter(BaseDataAdapter):
     async def get_sector_money_flow_history(
         self, sector_name: str, days: int = 20
     ) -> Dict[str, Any]:
-        """获取板块资金流向历史数据.
+        """获取板块资金流向历史数据（支持模糊匹配板块名称）.
 
         通过同花顺行业指数 (ths_index) 查找板块代码，
         再用 ths_daily 获取含成交量/成交额的日线数据，
@@ -1408,22 +1635,29 @@ class TushareAdapter(BaseDataAdapter):
             raise ValueError("Tushare client not available")
 
         try:
-            # Step 1: 查找板块指数代码
-            index_df = await self._run(client.ths_index, name=sector_name)
-            if index_df is None or index_df.empty:
+            # Step 1: 方案C — 三级缓存 + 模糊匹配解析板块
+            index_code, index_name, candidates = await self._resolve_sector_index(
+                sector_name
+            )
+
+            if index_code is None:
+                if candidates:
+                    return {
+                        "error": (
+                            f"板块名称 '{sector_name}' 不明确，" "请从以下候选中选择"
+                        ),
+                        "candidates": candidates,
+                        "sector_name": sector_name,
+                        "component_type": "sector_flow",
+                        "source": "tushare",
+                    }
                 return {
                     "error": f"未找到板块: {sector_name}",
                     "sector_name": sector_name,
                     "source": "tushare",
                 }
 
-            index_code = index_df.iloc[0].get("ts_code")
-            index_name = index_df.iloc[0].get("name", sector_name)
-            if not index_code:
-                return {
-                    "error": f"板块 {sector_name} 无指数代码",
-                    "source": "tushare",
-                }
+            index_name = index_name or sector_name
 
             end_date = datetime.now()
             start_date = end_date - timedelta(days=int(days * 1.6))
@@ -1455,6 +1689,12 @@ class TushareAdapter(BaseDataAdapter):
             records = []
             if daily_df is not None and not daily_df.empty:
                 daily_df = daily_df.sort_values("trade_date").tail(days)
+                # ths_daily 部分版本返回 pct_change，统一归一化到 pct_chg
+                if (
+                    "pct_change" in daily_df.columns
+                    and "pct_chg" not in daily_df.columns
+                ):
+                    daily_df = daily_df.rename(columns={"pct_change": "pct_chg"})
                 for col in [
                     "close",
                     "open",

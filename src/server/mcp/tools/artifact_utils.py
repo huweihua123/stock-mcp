@@ -39,16 +39,25 @@ class ComponentType(str, Enum):
     # 新闻
     NEWS_CITATIONS = "news_citations"
     RESEARCH_REPORTS = "research_reports"
+    # 美股专用
+    US_TECHNICAL_CHART = "us_technical_chart"
+    EARNINGS_TABLE = "earnings_table"
+    CASH_FLOW_CHART = "cash_flow_chart"
+    US_VALUATION = "us_valuation"
+    INSTITUTIONAL_HOLDINGS = "institutional_holdings"
+    US_VOLUME_ANALYSIS = "us_volume_analysis"
+    US_SECTOR_ETF = "us_sector_etf"
+    US_NEWS_SENTIMENT = "us_news_sentiment"
     # 其他
     OTHER = "other"
 
 
 class ArtifactResponse(TypedDict):
     """MCP 工具的标准返回结构 (Data Layering)"""
-    
-    summary: str 
+
+    summary: str
     """给 LLM 看的摘要 (必须是字符串)"""
-    
+
     artifact: Dict[str, Any]
     """给前端/Agent 内部使用的全量数据"""
 
@@ -74,7 +83,7 @@ def create_artifact_envelope(
 ) -> Dict[str, Any]:
     """
     创建 Artifact 信封
-    
+
     注意：此函数只创建 artifact 部分。
     如果需要返回给 Agent，请使用 create_artifact_response 组合 summary。
 
@@ -109,25 +118,20 @@ def create_artifact_envelope(
 
 
 def create_artifact_response(
-    summary: str,
-    artifact: Dict[str, Any]
+    summary: str, artifact: Dict[str, Any]
 ) -> ArtifactResponse:
     """
     创建标准 Artifact 返回结构
-    
+
     Args:
         summary: 给 LLM 看的文本摘要
         artifact: create_artifact_envelope 创建的字典
     """
-    return {
-        "summary": summary,
-        "artifact": artifact
-    }
+    return {"summary": summary, "artifact": artifact}
 
 
 def create_artifact_list_response(
-    summary: str,
-    artifacts: List[Dict[str, Any]]
+    summary: str, artifacts: List[Dict[str, Any]]
 ) -> ArtifactListResponse:
     """创建多产物返回结构."""
     return {
