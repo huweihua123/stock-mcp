@@ -178,17 +178,42 @@ def register_money_flow_tools(mcp: FastMCP):
             # moneyflow_hsgt 返回单位为万元，转换为亿元展示
             summary = result.get("summary", {})
             total_net = summary.get("total_net", 0)
-            if total_net:
-                total_net_yi = total_net / 10000  # 万元 → 亿元
-                amount_str = f"{total_net_yi:.2f}亿"
-            else:
-                amount_str = "暂无数据"
+            total_net_yi = (
+                float(total_net) / 10000 if isinstance(total_net, (int, float)) else None
+            )
+            series = (result.get("data") or {}).get("total") or []
+            dates = (result.get("data") or {}).get("dates") or []
+            latest_total = float(series[-1]) if series else None
+            prev_total = float(series[-2]) if len(series) >= 2 else None
+            latest_date = str(dates[-1]) if dates else "N/A"
 
-            summary_text = f"近{days}日北向资金简报:\n- 累计净流入: {amount_str}"
+            latest_total_yi = latest_total / 10000 if latest_total is not None else None
+            day_delta_text = (
+                f"(较前一日{(latest_total - prev_total) / 10000:+.2f}亿)"
+                if latest_total is not None and prev_total is not None
+                else ""
+            )
+            if total_net_yi is None:
+                flow_signal = "未知"
+            elif total_net_yi >= 0:
+                flow_signal = "外资阶段性净流入"
+            else:
+                flow_signal = "外资阶段性净流出"
+
+            summary_text = (
+                f"北向资金({days}日): 最新{latest_date}单日净流入"
+                f"{f'{latest_total_yi:+.2f}亿' if latest_total_yi is not None else 'N/A'}"
+                f"{day_delta_text}, 累计净流入"
+                f"{f'{total_net_yi:+.2f}亿' if total_net_yi is not None else 'N/A'}; "
+                f"资金信号={flow_signal}"
+            )
+            total_net_display = (
+                f"{total_net_yi:+.2f}亿" if total_net_yi is not None else "N/A"
+            )
 
             if ctx:
                 await ctx.info(
-                    f"✅ 北向资金流向获取完成", extra={"total_net": amount_str}
+                    f"✅ 北向资金流向获取完成", extra={"total_net": total_net_display}
                 )
 
             artifact = create_artifact_envelope(
@@ -362,12 +387,57 @@ def register_money_flow_tools(mcp: FastMCP):
             result = await money_flow_use_cases.get_money_supply(months)
             result["component_type"] = "money_supply"
 
-            summary_text = f"中国货币流动性：M1/M2 增速与剪刀差（近 {months} 个月）"
-
             content = result.get("data", []) or []
             content = sorted(content, key=lambda x: str(x.get("month", "")))
             if months > 0:
                 content = content[-months:]
+
+            def _to_float(v: Any) -> float | None:
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return None
+
+            def _fmt_pct(v: float | None) -> str:
+                return f"{v:.1f}%" if v is not None else "N/A"
+
+            latest = content[-1] if content else {}
+            prev = content[-2] if len(content) >= 2 else {}
+            latest_month = str(latest.get("month") or "N/A")
+
+            m1_yoy = _to_float(latest.get("m1_yoy"))
+            m2_yoy = _to_float(latest.get("m2_yoy"))
+            prev_m1_yoy = _to_float(prev.get("m1_yoy"))
+            prev_m2_yoy = _to_float(prev.get("m2_yoy"))
+
+            spread = _to_float(latest.get("m1_m2_spread"))
+            if spread is None and m1_yoy is not None and m2_yoy is not None:
+                spread = m1_yoy - m2_yoy
+            prev_spread = _to_float(prev.get("m1_m2_spread"))
+            if (
+                prev_spread is None
+                and prev_m1_yoy is not None
+                and prev_m2_yoy is not None
+            ):
+                prev_spread = prev_m1_yoy - prev_m2_yoy
+
+            spread_delta_text = (
+                f"(较上月{(spread - prev_spread):+.1f}pct)"
+                if spread is not None and prev_spread is not None
+                else ""
+            )
+            if spread is None:
+                liquidity_signal = "未知"
+            elif spread >= 0:
+                liquidity_signal = "企业活期改善"
+            else:
+                liquidity_signal = "资金偏沉淀"
+
+            summary_text = (
+                f"中国货币供应(近{months}月): 最新{latest_month}M1同比{_fmt_pct(m1_yoy)}, "
+                f"M2同比{_fmt_pct(m2_yoy)}, M1-M2剪刀差{_fmt_pct(spread)}{spread_delta_text}; "
+                f"流动性信号={liquidity_signal}"
+            )
             artifact = create_artifact_envelope(
                 component_type="money_supply",
                 name="Money Supply Data",
@@ -396,8 +466,6 @@ def register_money_flow_tools(mcp: FastMCP):
             result = await money_flow_use_cases.get_inflation_data(months)
             result["component_type"] = "inflation_data"
 
-            summary_text = f"中国月度通胀指标：CPI、PPI 及价差（近 {months} 个月）"
-
             data = result.get("data", {})
             cpi = data.get("CPI", []) if isinstance(data, dict) else []
             ppi = data.get("PPI", []) if isinstance(data, dict) else []
@@ -406,6 +474,66 @@ def register_money_flow_tools(mcp: FastMCP):
             if months > 0:
                 cpi = cpi[-months:]
                 ppi = ppi[-months:]
+
+            def _to_float(v: Any) -> float | None:
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return None
+
+            def _fmt_pct(v: float | None) -> str:
+                return f"{v:.1f}%" if v is not None else "N/A"
+
+            cpi_latest = cpi[-1] if cpi else {}
+            cpi_prev = cpi[-2] if len(cpi) >= 2 else {}
+            ppi_latest = ppi[-1] if ppi else {}
+            ppi_prev = ppi[-2] if len(ppi) >= 2 else {}
+            latest_month = str(cpi_latest.get("month") or ppi_latest.get("month") or "N/A")
+
+            cpi_yoy = _to_float(cpi_latest.get("nt_yoy"))
+            cpi_yoy_prev = _to_float(cpi_prev.get("nt_yoy"))
+            cpi_mom = _to_float(cpi_latest.get("nt_mom"))
+            ppi_yoy = _to_float(ppi_latest.get("ppi_yoy"))
+            ppi_yoy_prev = _to_float(ppi_prev.get("ppi_yoy"))
+            spread = (
+                cpi_yoy - ppi_yoy
+                if cpi_yoy is not None and ppi_yoy is not None
+                else None
+            )
+
+            cpi_delta_text = (
+                f"(较上月{(cpi_yoy - cpi_yoy_prev):+.1f}pct)"
+                if cpi_yoy is not None and cpi_yoy_prev is not None
+                else ""
+            )
+            ppi_delta_text = (
+                f"(较上月{(ppi_yoy - ppi_yoy_prev):+.1f}pct)"
+                if ppi_yoy is not None and ppi_yoy_prev is not None
+                else ""
+            )
+
+            if cpi_yoy is None and ppi_yoy is None:
+                inflation_signal = "未知"
+            elif (
+                cpi_yoy is not None
+                and ppi_yoy is not None
+                and cpi_yoy > 0
+                and ppi_yoy < 0
+            ):
+                inflation_signal = "消费偏温和、上游偏弱"
+            elif cpi_yoy is not None and cpi_yoy >= 2:
+                inflation_signal = "通胀压力抬升"
+            elif ppi_yoy is not None and ppi_yoy <= -2:
+                inflation_signal = "工业品价格偏弱"
+            else:
+                inflation_signal = "价格总体平稳"
+
+            summary_text = (
+                f"中国通胀(近{months}月): 最新{latest_month}CPI同比{_fmt_pct(cpi_yoy)}"
+                f"{cpi_delta_text}, 环比{_fmt_pct(cpi_mom)}; PPI同比{_fmt_pct(ppi_yoy)}"
+                f"{ppi_delta_text}, CPI-PPI剪刀差{_fmt_pct(spread)}; "
+                f"价格信号={inflation_signal}"
+            )
             artifact = create_artifact_envelope(
                 component_type="inflation_data",
                 name="Inflation Data",
@@ -432,12 +560,62 @@ def register_money_flow_tools(mcp: FastMCP):
             result = await money_flow_use_cases.get_pmi_data(months)
             result["component_type"] = "pmi_data"
 
-            summary_text = f"中国官方 PMI：制造业/非制造业及分项（近 {months} 个月）"
-
             content = result.get("data", []) or []
             content = sorted(content, key=lambda x: str(x.get("month", "")))
             if months > 0:
                 content = content[-months:]
+
+            def _to_float(v: Any) -> float | None:
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return None
+
+            latest = content[-1] if content else {}
+            prev = content[-2] if len(content) >= 2 else {}
+            latest_month = str(latest.get("month") or "N/A")
+
+            mfg = _to_float(latest.get("pmi"))
+            mfg_prev = _to_float(prev.get("pmi"))
+            non_mfg = _to_float(latest.get("pmi_non_mfg"))
+            non_mfg_prev = _to_float(prev.get("pmi_non_mfg"))
+            composite = _to_float(latest.get("pmi_composite"))
+            composite_prev = _to_float(prev.get("pmi_composite"))
+
+            def _fmt_val(v: float | None) -> str:
+                return f"{v:.1f}" if v is not None else "N/A"
+
+            def _fmt_delta(curr: float | None, base: float | None) -> str:
+                if curr is None or base is None:
+                    return ""
+                return f",环比{(curr - base):+.1f}"
+
+            mfg_state = (
+                "扩张"
+                if isinstance(mfg, (int, float)) and mfg >= 50
+                else ("收缩" if isinstance(mfg, (int, float)) else "未知")
+            )
+            non_mfg_state = (
+                "扩张"
+                if isinstance(non_mfg, (int, float)) and non_mfg >= 50
+                else ("收缩" if isinstance(non_mfg, (int, float)) else "未知")
+            )
+            if isinstance(mfg, (int, float)) and isinstance(non_mfg, (int, float)):
+                macro_state = (
+                    "偏强"
+                    if mfg >= 50 and non_mfg >= 50
+                    else ("偏弱" if mfg < 50 and non_mfg < 50 else "分化")
+                )
+            elif isinstance(composite, (int, float)):
+                macro_state = "偏强" if composite >= 50 else "偏弱"
+            else:
+                macro_state = "未知"
+            summary_text = (
+                f"中国PMI(近{months}月): 最新{latest_month}制造业{_fmt_val(mfg)}"
+                f"({mfg_state}{_fmt_delta(mfg, mfg_prev)}), 非制造业{_fmt_val(non_mfg)}"
+                f"({non_mfg_state}{_fmt_delta(non_mfg, non_mfg_prev)}), 综合{_fmt_val(composite)}"
+                f"{_fmt_delta(composite, composite_prev)}; 景气判断={macro_state}"
+            )
             artifact = create_artifact_envelope(
                 component_type="pmi_data",
                 name="PMI Data",
@@ -464,12 +642,54 @@ def register_money_flow_tools(mcp: FastMCP):
             result = await money_flow_use_cases.get_gdp_data(quarters)
             result["component_type"] = "gdp_data"
 
-            summary_text = f"中国季度 GDP 增长：总量与三产结构（近 {quarters} 个季度）"
-
             content = result.get("data", []) or []
             content = sorted(content, key=lambda x: str(x.get("quarter", "")))
             if quarters > 0:
                 content = content[-quarters:]
+
+            def _to_float(v: Any) -> float | None:
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return None
+
+            latest = content[-1] if content else {}
+            prev = content[-2] if len(content) >= 2 else {}
+            latest_quarter = str(latest.get("quarter") or "N/A")
+
+            gdp_yoy = _to_float(latest.get("gdp_yoy"))
+            gdp_yoy_prev = _to_float(prev.get("gdp_yoy"))
+            pi_yoy = _to_float(latest.get("pi_yoy"))
+            si_yoy = _to_float(latest.get("si_yoy"))
+            ti_yoy = _to_float(latest.get("ti_yoy"))
+
+            def _fmt_pct(v: float | None) -> str:
+                return f"{v:.1f}%" if v is not None else "N/A"
+
+            gdp_delta_text = (
+                f"(较上季{(gdp_yoy - gdp_yoy_prev):+.1f}pct)"
+                if gdp_yoy is not None and gdp_yoy_prev is not None
+                else ""
+            )
+
+            sector_candidates = []
+            if pi_yoy is not None:
+                sector_candidates.append(("一产", pi_yoy))
+            if si_yoy is not None:
+                sector_candidates.append(("二产", si_yoy))
+            if ti_yoy is not None:
+                sector_candidates.append(("三产", ti_yoy))
+            lead_sector = (
+                f"{max(sector_candidates, key=lambda x: x[1])[0]}领先"
+                if sector_candidates
+                else "结构未知"
+            )
+
+            summary_text = (
+                f"中国GDP(近{quarters}季): 最新{latest_quarter}同比{_fmt_pct(gdp_yoy)}"
+                f"{gdp_delta_text}; 三产同比一产{_fmt_pct(pi_yoy)}/二产{_fmt_pct(si_yoy)}"
+                f"/三产{_fmt_pct(ti_yoy)}({lead_sector})"
+            )
             artifact = create_artifact_envelope(
                 component_type="gdp_data",
                 name="GDP Data",
@@ -498,8 +718,6 @@ def register_money_flow_tools(mcp: FastMCP):
             result = await money_flow_use_cases.get_social_financing(months)
             result["component_type"] = "social_financing"
 
-            summary_text = "China Total Social Financing (TSF): Aggregate Credit Demand, Monthly Increments & Stock Growth Trends - Last 5 Years"
-
             data = result.get("data", []) or []
             # Normalize & slice latest N months (desc)
             data = sorted(data, key=lambda x: str(x.get("month", "")), reverse=True)
@@ -515,6 +733,52 @@ def register_money_flow_tools(mcp: FastMCP):
                 }
                 for r in data
             ]
+
+            def _to_float(v: Any) -> float | None:
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return None
+
+            latest = content[0] if content else {}
+            prev = content[1] if len(content) >= 2 else {}
+            latest_month = str(latest.get("month") or "N/A")
+
+            inc_month = _to_float(latest.get("inc_month"))
+            prev_inc_month = _to_float(prev.get("inc_month"))
+            stk_yoy = _to_float(latest.get("stk_yoy"))
+            prev_stk_yoy = _to_float(prev.get("stk_yoy"))
+
+            def _fmt_num(v: float | None) -> str:
+                if v is None:
+                    return "N/A"
+                return f"{v:,.1f}"
+
+            inc_delta_text = (
+                f"(较上月{(inc_month - prev_inc_month):+,.1f})"
+                if inc_month is not None and prev_inc_month is not None
+                else ""
+            )
+            stk_yoy_delta_text = (
+                f"(较上月{(stk_yoy - prev_stk_yoy):+.1f}pct)"
+                if stk_yoy is not None and prev_stk_yoy is not None
+                else ""
+            )
+
+            if stk_yoy is None:
+                credit_signal = "未知"
+            elif stk_yoy >= 9:
+                credit_signal = "信用扩张偏强"
+            elif stk_yoy <= 8:
+                credit_signal = "信用扩张偏弱"
+            else:
+                credit_signal = "信用扩张中性"
+
+            summary_text = (
+                f"中国社融(近{months}月): 最新{latest_month}新增社融{_fmt_num(inc_month)}"
+                f"{inc_delta_text}, 存量同比{f'{stk_yoy:.1f}%' if stk_yoy is not None else 'N/A'}"
+                f"{stk_yoy_delta_text}; 信用信号={credit_signal}"
+            )
             artifact = create_artifact_envelope(
                 component_type="social_financing",
                 name="Social Financing Data",
@@ -551,8 +815,6 @@ def register_money_flow_tools(mcp: FastMCP):
                 shibor_days, lpr_months
             )
             result["component_type"] = "interest_rates"
-
-            summary_text = "中国利率：SHIBOR 期限结构 + LPR（shibor_lpr）"
 
             shibor = result.get("data", {}).get("shibor", []) or []
             lpr = result.get("data", {}).get("lpr", []) or []
@@ -591,6 +853,74 @@ def register_money_flow_tools(mcp: FastMCP):
                 }
                 for r in lpr
             ]
+
+            def _to_float(v: Any) -> float | None:
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return None
+
+            shibor_latest = shibor_content[0] if shibor_content else {}
+            shibor_prev = shibor_content[1] if len(shibor_content) >= 2 else {}
+            lpr_latest = lpr_content[0] if lpr_content else {}
+            lpr_prev = lpr_content[1] if len(lpr_content) >= 2 else {}
+
+            latest_date = str(
+                shibor_latest.get("date") or lpr_latest.get("date") or "N/A"
+            )
+            shibor_1w = _to_float(shibor_latest.get("1w"))
+            shibor_1y = _to_float(shibor_latest.get("1y"))
+            prev_shibor_1w = _to_float(shibor_prev.get("1w"))
+
+            lpr_1y = _to_float(lpr_latest.get("lpr_1y"))
+            lpr_5y = _to_float(lpr_latest.get("lpr_5y"))
+            prev_lpr_1y = _to_float(lpr_prev.get("lpr_1y"))
+            prev_lpr_5y = _to_float(lpr_prev.get("lpr_5y"))
+
+            curve_spread = (
+                shibor_1y - shibor_1w
+                if shibor_1y is not None and shibor_1w is not None
+                else None
+            )
+            lpr_spread = (
+                lpr_5y - lpr_1y if lpr_1y is not None and lpr_5y is not None else None
+            )
+            lpr_1y_delta = (
+                lpr_1y - prev_lpr_1y
+                if lpr_1y is not None and prev_lpr_1y is not None
+                else None
+            )
+            lpr_5y_delta = (
+                lpr_5y - prev_lpr_5y
+                if lpr_5y is not None and prev_lpr_5y is not None
+                else None
+            )
+
+            if lpr_1y_delta is None and lpr_5y_delta is None:
+                policy_signal = "未知"
+            elif (
+                (lpr_1y_delta is None or lpr_1y_delta == 0)
+                and (lpr_5y_delta is None or lpr_5y_delta == 0)
+            ):
+                policy_signal = "政策利率按兵不动"
+            elif (
+                (lpr_1y_delta is not None and lpr_1y_delta < 0)
+                or (lpr_5y_delta is not None and lpr_5y_delta < 0)
+            ):
+                policy_signal = "政策利率偏宽松"
+            else:
+                policy_signal = "政策利率偏收紧"
+
+            def _fmt_pct(v: float | None) -> str:
+                return f"{v:.2f}%" if v is not None else "N/A"
+
+            summary_text = (
+                f"中国利率(Shibor+LPR): 最新{latest_date}Shibor1W/1Y="
+                f"{_fmt_pct(shibor_1w)}/{_fmt_pct(shibor_1y)}, 期限利差{_fmt_pct(curve_spread)}"
+                f"{f'(1W较前值{(shibor_1w - prev_shibor_1w):+.2f}pct)' if shibor_1w is not None and prev_shibor_1w is not None else ''}; "
+                f"LPR1Y/5Y={_fmt_pct(lpr_1y)}/{_fmt_pct(lpr_5y)}, 挂钩利差{_fmt_pct(lpr_spread)}; "
+                f"利率信号={policy_signal}"
+            )
 
             artifacts = [
                 create_artifact_envelope(
@@ -631,11 +961,24 @@ def register_money_flow_tools(mcp: FastMCP):
             result = await money_flow_use_cases.get_market_liquidity(days)
             result["component_type"] = "market_liquidity"
 
-            summary_text = "A 股市场流动性指标"
-
             data = result.get("data", {})
             north_flow = data.get("north_flow", [])
             margin = data.get("margin", [])
+            latest_north = north_flow[-1] if north_flow else {}
+            latest_margin = margin[-1] if margin else {}
+            north_value = latest_north.get("north_money")
+            margin_value = latest_margin.get("rzrqye")
+            latest_date = (
+                latest_north.get("trade_date")
+                or latest_margin.get("trade_date")
+                or "N/A"
+            )
+            summary_text = (
+                f"A股流动性({days}日): 最新{latest_date}北向净流入="
+                f"{north_value if north_value is not None else 'N/A'}, "
+                f"融资融券余额={margin_value if margin_value is not None else 'N/A'}, "
+                f"样本={len(north_flow)}/{len(margin)}日"
+            )
 
             north_series = []
             if north_flow:
@@ -709,8 +1052,6 @@ def register_money_flow_tools(mcp: FastMCP):
             logger.info("MCP tool called: get_market_money_flow", trade_date=trade_date)
             result = await money_flow_use_cases.get_market_money_flow(trade_date)
             result["component_type"] = "market_money_flow"
-
-            summary_text = "板块资金流向：净流入/净流出板块数量及全市场净流入"
 
             data = result.get("data", [])
             total_net = 0.0
@@ -849,7 +1190,17 @@ def register_money_flow_tools(mcp: FastMCP):
                 {"key": "sell_volume", "label": "卖出笔数(万)", "align": "right"},
             ]
 
-            summary_text = "港股通每日成交统计"
+            latest_row = rows[-1] if rows else {}
+            latest_date = latest_row.get("trade_date", "N/A")
+            buy_amount = latest_row.get("buy_amount")
+            sell_amount = latest_row.get("sell_amount")
+            net_amount = latest_row.get("net_amount")
+            summary_text = (
+                f"港股通成交({len(rows)}日): 最新{latest_date}净买入"
+                f"{f'{net_amount:+.2f}亿' if isinstance(net_amount, (int, float)) else 'N/A'}, "
+                f"买入{f'{buy_amount:.2f}亿' if isinstance(buy_amount, (int, float)) else 'N/A'}/"
+                f"卖出{f'{sell_amount:.2f}亿' if isinstance(sell_amount, (int, float)) else 'N/A'}"
+            )
 
             artifact = create_artifact_envelope(
                 component_type="table",

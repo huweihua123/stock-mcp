@@ -341,9 +341,55 @@ def register_asset_tools(mcp: FastMCP):
                 "data": prices,
             }
 
-            description = (
-                f"{ticker}历史价格: {start_date}至{end_date}, " f"共{len(prices)}条数据"
+            def _to_float(v: Any) -> float | None:
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return None
+
+            latest = prices[-1] if prices else {}
+            first = prices[0] if prices else {}
+            latest_date = str(latest.get("timestamp") or end_date)
+            latest_date = latest_date[:10] if latest_date else "N/A"
+
+            first_close = _to_float(first.get("close_price") or first.get("price"))
+            latest_close = _to_float(latest.get("close_price") or latest.get("price"))
+            pct_change = (
+                ((latest_close - first_close) / first_close * 100)
+                if (
+                    latest_close is not None
+                    and first_close is not None
+                    and first_close != 0
+                )
+                else None
             )
+
+            highs = []
+            lows = []
+            for row in prices:
+                high_val = _to_float(row.get("high_price"))
+                low_val = _to_float(row.get("low_price"))
+                if high_val is not None:
+                    highs.append(high_val)
+                if low_val is not None:
+                    lows.append(low_val)
+            period_high = max(highs) if highs else None
+            period_low = min(lows) if lows else None
+
+            if latest_close is None:
+                description = (
+                    f"{ticker} K线({interval}, {start_date}~{end_date}): "
+                    f"样本{len(prices)}根, 缺少有效收盘价"
+                )
+            else:
+                description = (
+                    f"{ticker} K线({interval}, {start_date}~{end_date}): 最新{latest_date}收盘"
+                    f"{latest_close:.2f}, 区间涨跌"
+                    f"{f'{pct_change:+.2f}%' if pct_change is not None else 'N/A'}, "
+                    f"最高/最低{f'{period_high:.2f}' if period_high is not None else 'N/A'}"
+                    f"/{f'{period_low:.2f}' if period_low is not None else 'N/A'}, "
+                    f"样本{len(prices)}根"
+                )
 
             artifact = create_artifact_envelope(
                 component_type="price_chart",

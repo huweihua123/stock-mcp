@@ -232,7 +232,40 @@ def register_fundamental_tools(mcp: FastMCP):
                 ),
             ]
 
-            summary_text = f"{ts_code} 财务图表：季度营收分解 + 季度净利润分解"
+            latest_rev_year = revenue_data[-1]["category"] if revenue_data else "N/A"
+            latest_ni_year = net_income_data[-1]["category"] if net_income_data else "N/A"
+            latest_rev_total = (
+                sum(
+                    v
+                    for v in (revenue_data[-1].get("bars", {}) or {}).values()
+                    if isinstance(v, (int, float))
+                )
+                if revenue_data
+                else None
+            )
+            latest_ni_total = (
+                sum(
+                    v
+                    for v in (net_income_data[-1].get("bars", {}) or {}).values()
+                    if isinstance(v, (int, float))
+                )
+                if net_income_data
+                else None
+            )
+            rev_yoy = revenue_data[-1].get("line") if revenue_data else None
+            ni_yoy = net_income_data[-1].get("line") if net_income_data else None
+
+            summary_text = (
+                f"{ts_code} 财务趋势: 最新年度营收"
+                f"{(latest_rev_total / 1e8):.2f}亿元"
+                f"{f' (同比{rev_yoy:+.1%})' if isinstance(rev_yoy, (int, float)) else ''}; "
+                f"归母净利润{(latest_ni_total / 1e8):.2f}亿元"
+                f"{f' (同比{ni_yoy:+.1%})' if isinstance(ni_yoy, (int, float)) else ''}; "
+                f"样本年度={latest_rev_year}/{latest_ni_year}"
+                if isinstance(latest_rev_total, (int, float))
+                and isinstance(latest_ni_total, (int, float))
+                else f"{ts_code} 财务趋势: 季度营收与净利润图表已生成"
+            )
 
             if ctx:
                 await ctx.info(
@@ -379,7 +412,26 @@ def register_fundamental_tools(mcp: FastMCP):
                     )
                 )
 
-            summary_text = f"{ts_code} 主营业务收入构成（分产品/分地区/分行业）"
+            dimensions = [a.get("metadata", {}).get("dimension") for a in artifacts]
+            dimension_name_map = {"P": "产品", "D": "地区", "I": "行业"}
+            dimension_labels = [
+                dimension_name_map.get(d, str(d)) for d in dimensions if d
+            ]
+            latest_periods = []
+            for a in artifacts:
+                default_date = (
+                    (a.get("content") or {}).get("default_date")
+                    if isinstance(a.get("content"), dict)
+                    else None
+                )
+                if default_date:
+                    latest_periods.append(str(default_date))
+            latest_period = max(latest_periods) if latest_periods else "N/A"
+            summary_text = (
+                f"{ts_code} 主营构成: 维度{len(artifacts)}个"
+                f"({','.join(dimension_labels) or 'N/A'}), "
+                f"最新报告期{latest_period}"
+            )
 
             if ctx:
                 await ctx.info(
@@ -663,7 +715,29 @@ def register_fundamental_tools(mcp: FastMCP):
                     )
                 )
 
-            summary_text = f"{ts_code} 前十股东/流通股东、股东人数趋势、股东交易记录"
+            top10_count = len(top10) if isinstance(top10, list) else 0
+            float10_count = len(float10) if isinstance(float10, list) else 0
+            holder_num_latest = None
+            holder_num_prev = None
+            if holder_num:
+                sorted_holder_num = sorted(
+                    holder_num, key=lambda x: str(x.get("end_date") or x.get("ann_date") or "")
+                )
+                if sorted_holder_num:
+                    holder_num_latest = sorted_holder_num[-1].get("holder_num")
+                if len(sorted_holder_num) >= 2:
+                    holder_num_prev = sorted_holder_num[-2].get("holder_num")
+            holder_trade_count = len(holder_trade) if isinstance(holder_trade, list) else 0
+            holder_delta_text = ""
+            if isinstance(holder_num_latest, (int, float)) and isinstance(holder_num_prev, (int, float)):
+                delta = holder_num_latest - holder_num_prev
+                holder_delta_text = f", 户数环比{delta:+.0f}"
+            summary_text = (
+                f"{ts_code} 股东结构: 前十股东记录{top10_count}条, "
+                f"前十流通股东记录{float10_count}条, "
+                f"近一年增减持记录{holder_trade_count}条"
+                f"{holder_delta_text}"
+            )
 
             if ctx:
                 await ctx.info(f"✅ 股东信息获取完成: {ts_code}")
@@ -742,7 +816,52 @@ def register_fundamental_tools(mcp: FastMCP):
                 display_in_report=True,
             )
 
-            summary_text = f"{ts_code} 分红送股历史: 共 {len(rows)} 条记录"
+            def _normalize_end_date(value: Any) -> str:
+                if value is None:
+                    return ""
+                text = str(value).strip().replace("-", "").replace("/", "")
+                return text[:8] if len(text) >= 8 else ""
+
+            def _to_float(v: Any) -> float | None:
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return None
+
+            rows_sorted = sorted(
+                rows, key=lambda r: _normalize_end_date(r.get("end_date")), reverse=True
+            )
+            latest_row = rows_sorted[0] if rows_sorted else {}
+            latest_end_date = _normalize_end_date(latest_row.get("end_date"))
+            latest_end_date = (
+                f"{latest_end_date[:4]}-{latest_end_date[4:6]}-{latest_end_date[6:8]}"
+                if len(latest_end_date) == 8
+                else "N/A"
+            )
+
+            latest_cash_div_pre_tax = _to_float(latest_row.get("cash_div_tax"))
+            latest_cash_div_after_tax = _to_float(latest_row.get("cash_div"))
+
+            implemented = 0
+            total_cash_div_pre_tax = 0.0
+            total_cash_div_count = 0
+            for row in rows:
+                div_proc = str(row.get("div_proc") or "")
+                if "实施" in div_proc or "完成" in div_proc:
+                    implemented += 1
+                div_val = _to_float(row.get("cash_div_tax"))
+                if div_val is not None:
+                    total_cash_div_pre_tax += div_val
+                    total_cash_div_count += 1
+
+            summary_text = (
+                f"{ts_code} 分红送股({len(rows)}期): 最近{latest_end_date}税前/税后每股"
+                f"{f'{latest_cash_div_pre_tax:.3f}' if latest_cash_div_pre_tax is not None else 'N/A'}"
+                f"/{f'{latest_cash_div_after_tax:.3f}' if latest_cash_div_after_tax is not None else 'N/A'}, "
+                f"已实施{implemented}/{len(rows)}期, "
+                f"税前累计每股分红"
+                f"{f'{total_cash_div_pre_tax:.3f}' if total_cash_div_count > 0 else 'N/A'}"
+            )
 
             if ctx:
                 await ctx.info(

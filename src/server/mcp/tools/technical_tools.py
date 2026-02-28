@@ -138,14 +138,17 @@ def register_technical_tools(mcp: FastMCP):
                 dates_count=len(result.get("dates", [])) if isinstance(result.get("dates"), list) else 0,
             )
             rsi = 0.0
+            has_rsi = False
             macd_signal = "中性"
             current_price = 0.0
+            has_current_price = False
             if rows:
                 # RSI: last non-null
                 for row in reversed(rows):
                     val = row.get("RSI")
                     if val is not None:
                         rsi = float(val)
+                        has_rsi = True
                         break
                 # MACD: diff vs signal
                 for row in reversed(rows):
@@ -157,23 +160,24 @@ def register_technical_tools(mcp: FastMCP):
                 # price
                 last_close = rows[-1].get("close")
                 current_price = float(last_close) if last_close is not None else 0.0
+                has_current_price = last_close is not None
 
             # 判断 RSI 状态
-            if rsi > 70:
+            if not has_rsi:
+                rsi_status = "未知"
+            elif rsi > 70:
                 rsi_status = "超买"
             elif rsi < 30:
                 rsi_status = "超卖"
             else:
                 rsi_status = "中性"
 
-            metadata = f"{symbol}技术分析: RSI={rsi:.1f}({rsi_status}), MACD信号{macd_signal}, 当前价{current_price:.2f}"
-
             # 记录成功
             if ctx:
                 await ctx.info(
                     f"✅ 技术指标计算完成: {symbol}",
                     extra={
-                        "rsi": rsi,
+                        "rsi": rsi if has_rsi else None,
                         "rsi_status": rsi_status,
                         "macd_signal": macd_signal,
                     },
@@ -184,17 +188,17 @@ def register_technical_tools(mcp: FastMCP):
 
             ts_code = result.get("ts_code") or await _resolve_ts_code(symbol)
             name = f"Technical Indicators: {ts_code}"
-
-            # 对齐竞品描述
-            if isinstance(result.get("rows"), list) and result["rows"]:
-                start_date = result["rows"][0].get("trade_date")
-                end_date = result["rows"][-1].get("trade_date")
-                if start_date and end_date:
-                    metadata = (
-                        f"Technical Analysis Chart for {ts_code} "
-                        f"(from {start_date} to {end_date}). Contains Daily Close Price, "
-                        f"Moving Averages (MA5/10/20/60), MACD (Diff/Dea/Macd), RSI(14), and KDJ indicators."
-                    )
+            start_date = rows[0].get("trade_date") if rows else None
+            end_date = rows[-1].get("trade_date") if rows else None
+            range_text = (
+                f"{start_date}~{end_date}" if start_date and end_date else "区间未知"
+            )
+            rsi_text = f"{rsi:.1f}({rsi_status})" if has_rsi else "N/A"
+            price_text = f"{current_price:.2f}" if has_current_price else "N/A"
+            metadata = (
+                f"{ts_code} 技术面: 区间{range_text}, 收盘{price_text}, "
+                f"RSI={rsi_text}, MACD={macd_signal}, 样本{len(rows)}日"
+            )
 
             artifact = create_artifact_envelope(
                 component_type="technical_indicators",
@@ -260,13 +264,43 @@ def register_technical_tools(mcp: FastMCP):
                 start_date = content[0].get("trade_date")
                 end_date = content[-1].get("trade_date")
 
-            description = f"Technical Indicators: {result['ts_code']}"
-            if start_date and end_date:
-                description = (
-                    f"Technical Analysis Chart for {result['ts_code']} "
-                    f"(from {start_date} to {end_date}). Contains Daily Close Price, "
-                    f"Moving Averages (MA5/10/20/60), MACD (Diff/Dea/Macd), RSI(14), and KDJ indicators."
-                )
+            latest_rsi = None
+            latest_close = None
+            macd_signal = "中性"
+            if isinstance(content, list) and content:
+                for row in reversed(content):
+                    val = row.get("RSI")
+                    if val is not None:
+                        latest_rsi = float(val)
+                        break
+                for row in reversed(content):
+                    close_val = row.get("close")
+                    if close_val is not None:
+                        latest_close = float(close_val)
+                        break
+                for row in reversed(content):
+                    diff = row.get("MACD")
+                    dea = row.get("MACD_signal")
+                    if diff is not None and dea is not None:
+                        macd_signal = "多头" if diff > dea else "空头"
+                        break
+
+            range_text = (
+                f"{start_date}~{end_date}" if start_date and end_date else "区间未知"
+            )
+            if latest_rsi is None:
+                rsi_text = "N/A"
+            elif latest_rsi > 70:
+                rsi_text = f"{latest_rsi:.1f}(超买)"
+            elif latest_rsi < 30:
+                rsi_text = f"{latest_rsi:.1f}(超卖)"
+            else:
+                rsi_text = f"{latest_rsi:.1f}(中性)"
+            price_text = f"{latest_close:.2f}" if latest_close is not None else "N/A"
+            description = (
+                f"{result['ts_code']} 技术面: 区间{range_text}, 收盘{price_text}, "
+                f"RSI={rsi_text}, MACD={macd_signal}, 样本{len(content) if isinstance(content, list) else 0}日"
+            )
 
             artifact = create_artifact_envelope(
                 component_type="technical_indicators",

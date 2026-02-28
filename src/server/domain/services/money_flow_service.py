@@ -40,7 +40,8 @@ class MoneyFlowService:
         self.logger.info(f"Getting money flow for {ticker}, days={days}")
 
         try:
-            result = await self.adapter_manager.get_money_flow(ticker, days)
+            # MarketGateway ticker-scoped synthesized methods accept kwargs.
+            result = await self.adapter_manager.get_money_flow(ticker, days=days)
             return result
         except Exception as e:
             self.logger.error(f"Failed to get money flow for {symbol}: {e}")

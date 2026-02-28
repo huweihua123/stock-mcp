@@ -100,7 +100,28 @@ def register_filings_tools(mcp: FastMCP):
                 "component_type": "table"
             }
             
-            description = f"{ticker} SEC定期报告: 找到{len(results)}份文件"
+            filing_dates = [
+                str(r.get("filing_date") or r.get("report_date") or "")
+                for r in results
+                if isinstance(r, dict)
+            ]
+            filing_dates = [d for d in filing_dates if d]
+            date_range = (
+                f"{min(filing_dates)}~{max(filing_dates)}" if filing_dates else "日期未知"
+            )
+            form_set = sorted(
+                {
+                    str(r.get("form") or "").strip()
+                    for r in results
+                    if isinstance(r, dict) and r.get("form")
+                }
+            )
+            fallback_forms = [str(f).strip() for f in (forms or []) if str(f).strip()]
+            forms_text = ",".join(form_set[:3]) if form_set else ",".join(fallback_forms[:3])
+            description = (
+                f"{ticker} SEC定期报告: {len(results)}份, "
+                f"表单={forms_text or 'N/A'}, 区间={date_range}"
+            )
             
             artifact = create_artifact_envelope(
                 component_type="table",
@@ -205,7 +226,27 @@ def register_filings_tools(mcp: FastMCP):
                 "component_type": "table"
             }
             
-            description = f"{ticker} SEC临时报告: 找到{len(results)}份文件"
+            filing_dates = [
+                str(r.get("filing_date") or r.get("report_date") or "")
+                for r in results
+                if isinstance(r, dict)
+            ]
+            filing_dates = [d for d in filing_dates if d]
+            date_range = (
+                f"{min(filing_dates)}~{max(filing_dates)}" if filing_dates else "日期未知"
+            )
+            form_set = sorted(
+                {
+                    str(r.get("form") or "").strip()
+                    for r in results
+                    if isinstance(r, dict) and r.get("form")
+                }
+            )
+            forms_text = ",".join(form_set[:3]) if form_set else ",".join(forms or [])
+            description = (
+                f"{ticker} SEC临时报告: {len(results)}份, "
+                f"表单={forms_text or 'N/A'}, 区间={date_range}"
+            )
             
             artifact = create_artifact_envelope(
                 component_type="table",
@@ -306,7 +347,32 @@ def register_filings_tools(mcp: FastMCP):
                 "component_type": "table"
             }
             
-            description = f"{symbol} A股公告: 找到{len(results)}份文件"
+            filing_dates = [
+                str(r.get("ann_date") or r.get("pub_date") or r.get("end_date") or "")
+                for r in results
+                if isinstance(r, dict)
+            ]
+            filing_dates = [d for d in filing_dates if d]
+            date_range = (
+                f"{min(filing_dates)}~{max(filing_dates)}" if filing_dates else "日期未知"
+            )
+            type_set = sorted(
+                {
+                    str(
+                        r.get("filing_type")
+                        or r.get("report_type")
+                        or r.get("announcement_type")
+                        or ""
+                    ).strip()
+                    for r in results
+                    if isinstance(r, dict)
+                }
+            )
+            types_text = ",".join([t for t in type_set if t][:3]) or ",".join(filing_types or [])
+            description = (
+                f"{symbol} A股公告: {len(results)}份, 类型={types_text or 'N/A'}, "
+                f"区间={date_range}"
+            )
             
             artifact = create_artifact_envelope(
                 component_type="table",

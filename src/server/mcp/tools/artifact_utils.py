@@ -93,7 +93,7 @@ def create_artifact_envelope(
         content: 数据内容
         description: 摘要描述
         metadata: 元信息
-        visible_to_llm: 是否发给 LLM (已废弃，由 ArtifactResponse 机制接管)
+        visible_to_llm: 兼容字段(已废弃)；LLM 可见内容应通过 summary 控制
         display_in_report: 是否在报告中展示
 
     Returns:
