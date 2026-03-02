@@ -53,6 +53,7 @@ get_financials = _gw_usecase("get_financials")
 get_mainbz_info = _gw_usecase("get_mainbz_info")
 get_shareholder_info = _gw_usecase("get_shareholder_info")
 get_dividend_info = _gw_usecase("get_dividend_info")
+get_forecast_info = _gw_usecase("get_forecast_info")
 get_valuation_metrics = _gw_usecase("get_valuation_metrics")
 # US fundamental
 get_earnings_history = _gw_usecase("get_earnings_history")

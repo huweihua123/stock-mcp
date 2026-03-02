@@ -99,6 +99,7 @@
    - `TUSHARE_TOKEN` - 用于 A 股数据（[获取 Token](https://tushare.pro/register)）
    - `FINNHUB_ENABLED` - 是否启用 Finnhub 数据源（默认 False）
    - `FINNHUB_API_KEY` - 用于美股机构数据（[获取 API Key](https://finnhub.io/)）
+   - `FRED_API_KEY` - 用于美股宏观指标（GDP/CPI/失业率/利率，免费申请，[获取 API Key](https://fred.stlouisfed.org/docs/api/api_key.html)）
    - `DASHSCOPE_API_KEY` - 用于阿里百炼 AI（可选，用于测试）
 
    > **💡 提示**: 本项目采用**可插拔设计**。如果没有配置 API Key，系统会自动禁用相应的数据源，并使用免费的替代方案（如 Akshare, Baostock, Yahoo Finance）作为后备。
@@ -429,6 +430,7 @@ Optimized for LLM context windows:
    - `TUSHARE_TOKEN` - For China A-shares data ([Get Token](https://tushare.pro/register))
    - `FINNHUB_ENABLED` - Enable Finnhub data source (default: False)
    - `FINNHUB_API_KEY` - For US institutional data ([Get API Key](https://finnhub.io/))
+   - `FRED_API_KEY` - For US macro indicators (GDP/CPI/Unemployment/Rates, free key, [Get API Key](https://fred.stlouisfed.org/docs/api/api_key.html))
    - `DASHSCOPE_API_KEY` - For Alibaba Cloud AI (optional, for testing)
 
    > **💡 Note**: This project features a **pluggable design**. If API keys are not configured, the system will automatically disable the corresponding data sources and use free alternatives (like Akshare, Baostock, Yahoo Finance) as fallbacks.

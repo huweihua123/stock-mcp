@@ -106,6 +106,13 @@ async def init_adapters() -> None:
         # 现货贵金属数据源（Alpha Vantage）
         adapter_manager.register_adapter(Container.alpha_vantage_adapter())
 
+        # US macro 数据源（FRED）
+        if config.api_keys.fred:
+            adapter_manager.register_adapter(Container.fred_adapter())
+            logger.info("✅ FRED adapter registered")
+        else:
+            logger.info("ℹ️  FRED disabled (set FRED_API_KEY to enable US macro tools)")
+
         # 美股数据源
         adapter_manager.register_adapter(Container.yahoo_adapter())
         if finnhub_available:

@@ -438,6 +438,105 @@ class TushareAdapter(BaseDataAdapter):
             self.logger.error(f"Failed to fetch dividend info: {e}")
             raise
 
+    async def get_forecast_info(self, ticker: str, limit: int = 50) -> Dict[str, Any]:
+        """Fetch performance forecast data from Tushare.
+
+        Args:
+            ticker: Asset ticker in internal format
+            limit: Maximum number of records to return
+
+        Returns:
+            Dictionary containing forecast rows
+        """
+        cache_key = f"tushare:forecast:{ticker}:l{limit}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        client = self.tushare_conn.get_client()
+        if client is None:
+            raise ValueError("Tushare client not available")
+
+        ts_code = self._to_ts_code(ticker)
+
+        def _fmt_date(value: Any) -> str | None:
+            if value is None:
+                return None
+            text = str(value).strip().replace("-", "").replace("/", "")
+            if len(text) == 8 and text.isdigit():
+                return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
+            return str(value)
+
+        try:
+            df = await self._run(
+                client.forecast,
+                ts_code=ts_code,
+                fields=(
+                    "ts_code,ann_date,end_date,type,p_change_min,p_change_max,"
+                    "net_profit_min,net_profit_max,last_parent_net,first_ann_date,"
+                    "summary,change_reason,update_flag"
+                ),
+                limit=limit,
+            )
+
+            if df is None or df.empty:
+                result = {
+                    "component_type": "forecast_info",
+                    "source": "tushare",
+                    "ts_code": ts_code,
+                    "rows": [],
+                }
+            else:
+                df = df.where(df.notnull(), None)
+                rows = df.to_dict("records")
+
+                for row in rows:
+                    row["ann_date"] = _fmt_date(row.get("ann_date"))
+                    row["end_date"] = _fmt_date(row.get("end_date"))
+                    row["first_ann_date"] = _fmt_date(row.get("first_ann_date"))
+
+                rows.sort(
+                    key=lambda r: (
+                        str(r.get("ann_date") or ""),
+                        str(r.get("end_date") or ""),
+                    ),
+                    reverse=True,
+                )
+
+                dedup_rows = []
+                seen = set()
+                for row in rows:
+                    key = (
+                        row.get("ts_code"),
+                        row.get("ann_date"),
+                        row.get("end_date"),
+                        row.get("summary"),
+                    )
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    dedup_rows.append(row)
+
+                if limit and limit > 0:
+                    dedup_rows = dedup_rows[:limit]
+
+                result = {
+                    "component_type": "forecast_info",
+                    "source": "tushare",
+                    "ts_code": ts_code,
+                    "rows": dedup_rows,
+                }
+
+            try:
+                await self.cache.set(cache_key, result, ttl=43200)
+            except Exception as cache_error:
+                self.logger.warning(f"Failed to cache forecast data: {cache_error}")
+
+            return result
+        except Exception as e:
+            self.logger.error(f"Failed to fetch forecast info: {e}")
+            raise
+
     async def get_money_flow(self, ticker: str, days: int = 20) -> Dict[str, Any]:
         """获取个股资金流向数据
 

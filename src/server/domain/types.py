@@ -71,6 +71,7 @@ class DataSource(str, Enum):
     FUTURES = "futures"
     TWELVE_DATA = "twelve_data"
     CCXT = "ccxt"
+    FRED = "fred"
 
 
 @dataclass

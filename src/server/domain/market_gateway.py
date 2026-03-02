@@ -32,6 +32,7 @@ _TICKER_METHODS: Set[str] = {
     "get_mainbz_info",
     "get_shareholder_info",
     "get_dividend_info",
+    "get_forecast_info",
     "get_valuation_metrics",
     "get_money_flow",
     "get_chip_distribution",
@@ -62,6 +63,10 @@ _MARKET_METHODS: Set[str] = {
     "get_ggt_daily",
     # US sector (market-wide, no symbol)
     "get_us_sector_etf_analysis",
+    # US macro
+    "get_us_economic_growth",
+    "get_us_inflation_employment",
+    "get_us_interest_rates",
 }
 
 

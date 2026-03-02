@@ -182,6 +182,22 @@ class BaseDataAdapter(abc.ABC):
             f"{self.source.value} does not support get_dividend_info"
         )
 
+    async def get_forecast_info(
+        self, ticker: str, limit: int = 50
+    ) -> Dict[str, Any]:
+        """Optional method to fetch performance forecast info.
+
+        Args:
+            ticker: Asset ticker in internal format
+            limit: Maximum number of records
+
+        Returns:
+            Dictionary containing forecast rows
+        """
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_forecast_info"
+        )
+
     async def get_money_flow(self, ticker: str, days: int = 20) -> Dict[str, Any]:
         """获取个股资金流向数据 (Optional)
 
@@ -414,6 +430,24 @@ class BaseDataAdapter(abc.ABC):
         """
         raise NotImplementedError(
             f"{self.source.value} does not support get_us_sector_etf_analysis"
+        )
+
+    async def get_us_economic_growth(self, quarters: int = 20) -> Dict[str, Any]:
+        """Fetch US real GDP levels and growth rates (Optional)."""
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_us_economic_growth"
+        )
+
+    async def get_us_inflation_employment(self, months: int = 24) -> Dict[str, Any]:
+        """Fetch US CPI and unemployment time series (Optional)."""
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_us_inflation_employment"
+        )
+
+    async def get_us_interest_rates(self, days: int = 180) -> Dict[str, Any]:
+        """Fetch US rates (2Y/10Y/Fed Funds) and curve spread (Optional)."""
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_us_interest_rates"
         )
 
     async def get_technical_indicators(

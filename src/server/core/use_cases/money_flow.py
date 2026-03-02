@@ -119,3 +119,21 @@ async def get_ggt_daily(days: int = 60) -> Dict[str, Any]:
     manager = Container.market_gateway()
     logger.info("UseCase: get_ggt_daily", days=days)
     return await manager.get_ggt_daily(days)
+
+
+async def get_us_economic_growth(quarters: int = 20) -> Dict[str, Any]:
+    manager = Container.market_gateway()
+    logger.info("UseCase: get_us_economic_growth", quarters=quarters)
+    return await manager.get_us_economic_growth(quarters)
+
+
+async def get_us_inflation_employment(months: int = 24) -> Dict[str, Any]:
+    manager = Container.market_gateway()
+    logger.info("UseCase: get_us_inflation_employment", months=months)
+    return await manager.get_us_inflation_employment(months)
+
+
+async def get_us_interest_rates(days: int = 180) -> Dict[str, Any]:
+    manager = Container.market_gateway()
+    logger.info("UseCase: get_us_interest_rates", days=days)
+    return await manager.get_us_interest_rates(days)

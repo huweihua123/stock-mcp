@@ -290,6 +290,11 @@ class AdapterManager:
     async def get_dividend_info(self, ticker: str) -> Dict[str, Any]:
         return await self._dispatch_ticker("get_dividend_info", ticker)
 
+    async def get_forecast_info(
+        self, ticker: str, limit: int = 50
+    ) -> Dict[str, Any]:
+        return await self._dispatch_ticker("get_forecast_info", ticker, limit=limit)
+
     async def get_mainbz_info(self, ticker: str) -> Dict[str, Any]:
         return await self._dispatch_ticker("get_mainbz_info", ticker)
 
@@ -385,6 +390,27 @@ class AdapterManager:
         """Fetch US sector ETF klines by sector name."""
         return await self._dispatch_market(
             "get_us_sector_etf_analysis", sector_name=sector_name, days=days
+        )
+
+    async def get_us_economic_growth(self, quarters: int = 20) -> Dict[str, Any]:
+        """Fetch US real GDP levels and growth rates."""
+        return await self._dispatch_market(
+            "get_us_economic_growth",
+            quarters=quarters,
+        )
+
+    async def get_us_inflation_employment(self, months: int = 24) -> Dict[str, Any]:
+        """Fetch US inflation (CPI YoY) and unemployment rate."""
+        return await self._dispatch_market(
+            "get_us_inflation_employment",
+            months=months,
+        )
+
+    async def get_us_interest_rates(self, days: int = 180) -> Dict[str, Any]:
+        """Fetch US 2Y/10Y/Fed Funds rates and curve spread."""
+        return await self._dispatch_market(
+            "get_us_interest_rates",
+            days=days,
         )
 
     # =========================================================================

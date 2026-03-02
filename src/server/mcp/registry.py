@@ -23,6 +23,7 @@ from src.server.mcp.tools.news_tools import register_news_tools
 from src.server.mcp.tools.us_fundamental_tools import register_us_fundamental_tools
 from src.server.mcp.tools.us_technical_tools import register_us_technical_tools
 from src.server.mcp.tools.us_sector_tools import register_us_sector_tools
+from src.server.mcp.tools.us_macro_tools import register_us_macro_tools
 
 
 @dataclass(frozen=True)
@@ -40,7 +41,7 @@ TOOL_GROUPS: List[ToolGroup] = [
         register=register_fundamental_tools,
         enabled=True,
         description="基本面分析",
-        count=5,
+        count=6,
     ),
     ToolGroup(
         name="asset",
@@ -112,6 +113,13 @@ TOOL_GROUPS: List[ToolGroup] = [
         enabled=True,
         description="美股行业ETF分析",
         count=1,
+    ),
+    ToolGroup(
+        name="us-macro",
+        register=register_us_macro_tools,
+        enabled=True,
+        description="美股宏观分析 (GDP/通胀就业/利率)",
+        count=3,
     ),
 ]
 

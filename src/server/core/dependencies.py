@@ -23,6 +23,7 @@ from src.server.domain.adapters.ccxt_adapter import CCXTAdapter
 from src.server.domain.adapters.futures_adapter import FuturesAdapter
 from src.server.domain.adapters.alpha_vantage_adapter import AlphaVantageAdapter
 from src.server.domain.adapters.twelve_data_adapter import TwelveDataAdapter
+from src.server.domain.adapters.fred_adapter import FredAdapter
 
 # Services
 from src.server.domain.services.fundamental_service import FundamentalService
@@ -129,6 +130,19 @@ class Container(containers.DeclarativeContainer):
     twelve_data_adapter = providers.Singleton(
         TwelveDataAdapter,
         api_key=providers.Callable(lambda cfg: cfg.api_keys.twelve_data or "", config),
+        cache=cache,
+        proxy_url=providers.Callable(
+            lambda cfg: (
+                f"http://{cfg.proxy.host}:{cfg.proxy.port}"
+                if cfg.proxy.enabled
+                else None
+            ),
+            config,
+        ),
+    )
+    fred_adapter = providers.Singleton(
+        FredAdapter,
+        api_key=providers.Callable(lambda cfg: cfg.api_keys.fred or "", config),
         cache=cache,
         proxy_url=providers.Callable(
             lambda cfg: (

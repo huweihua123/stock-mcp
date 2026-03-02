@@ -70,6 +70,7 @@ class APIKeysConfig(BaseAppSettings):
     twelve_data: Optional[str] = Field(None, validation_alias="TWELVE_DATA_API_KEY")
     news_api: Optional[str] = Field(None, validation_alias="NEWS_API_KEY")
     tavily: Optional[str] = Field(None, validation_alias="TAVILY_API_KEY")
+    fred: Optional[str] = Field(None, validation_alias="FRED_API_KEY")
     google: Optional[str] = Field(None, validation_alias="GOOGLE_API_KEY")
     openrouter: Optional[str] = Field(None, validation_alias="OPENROUTER_API_KEY")
 

@@ -887,6 +887,101 @@ def register_fundamental_tools(mcp: FastMCP):
             return {"error": str(e)}
 
     @mcp.tool(tags={"fundamental"})
+    async def get_forecast_info(
+        symbol: str | None = None,
+        ts_code: str | None = None,
+        limit: int = 50,
+        ctx: Context = None,
+    ) -> Dict[str, Any]:
+        """Get performance forecast info for the given A-share ticker."""
+        if not symbol and not ts_code:
+            return {"error": "symbol or ts_code is required"}
+
+        raw_symbol = ts_code or symbol
+        if ctx:
+            await ctx.info(
+                f"🔧 获取业绩预告: {raw_symbol}",
+                extra={"symbol": raw_symbol, "limit": limit},
+            )
+
+        try:
+            logger.info(
+                "MCP tool called: get_forecast_info",
+                symbol=raw_symbol,
+                limit=limit,
+            )
+
+            data = await fundamental_use_cases.get_forecast_info(raw_symbol, limit=limit)
+            rows = data.get("rows", [])
+            ts_code_value = data.get("ts_code") or await _resolve_ts_code(raw_symbol)
+
+            columns = [
+                {"key": "ts_code", "label": "代码"},
+                {"key": "ann_date", "label": "公告日期"},
+                {"key": "end_date", "label": "报告期"},
+                {"key": "type", "label": "预告类型"},
+                {"key": "p_change_min", "label": "预告净利润变动幅度下限%", "align": "right"},
+                {"key": "p_change_max", "label": "预告净利润变动幅度上限%", "align": "right"},
+                {"key": "net_profit_min", "label": "预告净利润下限(万)", "align": "right"},
+                {"key": "net_profit_max", "label": "预告净利润上限(万)", "align": "right"},
+                {"key": "last_parent_net", "label": "上年同期净利润", "align": "right"},
+                {"key": "summary", "label": "业绩预告摘要"},
+                {"key": "change_reason", "label": "业绩变动原因"},
+            ]
+
+            table_artifact = create_artifact_envelope(
+                component_type="table",
+                name=f"Performance Forecast: {ts_code_value}",
+                content={
+                    "title": "业绩预告",
+                    "tag": ts_code_value,
+                    "columns": columns,
+                    "rows": rows,
+                },
+                description=f"Performance forecast for {ts_code_value}",
+                metadata={
+                    "type": "table",
+                    "ts_code": ts_code_value,
+                    "dataset": "forecast",
+                },
+                visible_to_llm=False,
+                display_in_report=True,
+            )
+
+            latest = rows[0] if rows else {}
+            latest_ann_date = latest.get("ann_date") or "N/A"
+            latest_type = latest.get("type") or "N/A"
+            summary_text = (
+                f"{ts_code_value} 业绩预告共{len(rows)}条, 最近公告日{latest_ann_date}, "
+                f"最新预告类型={latest_type}"
+            )
+
+            if ctx:
+                await ctx.info(
+                    f"✅ 业绩预告获取完成: {ts_code_value}",
+                    extra={"rows": len(rows)},
+                )
+
+            return create_artifact_response(
+                summary=summary_text,
+                artifact=table_artifact,
+            )
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败: {raw_symbol}", extra=e.to_dict())
+            return create_symbol_error_response(
+                e, component_type="table", name=f"{raw_symbol} 业绩预告"
+            )
+        except Exception as e:
+            logger.error(f"Get forecast info failed: {e}")
+            if ctx:
+                await ctx.error(
+                    f"❌ 获取业绩预告失败: {raw_symbol}",
+                    extra={"error": str(e)},
+                )
+            return {"error": str(e)}
+
+    @mcp.tool(tags={"fundamental"})
     async def get_valuation_metrics(
         symbol: str, days: int = 250, ctx: Context = None
     ) -> Dict[str, Any]:

@@ -177,6 +177,7 @@ def get_tools_by_tag(tag: str) -> list[str]:
         "fundamental": [
             "get_financial_reports",
             "get_dividend_info",
+            "get_forecast_info",
             "get_mainbz_info",
             "get_shareholder_info",
         ],
@@ -209,6 +210,11 @@ def get_tools_by_tag(tag: str) -> list[str]:
         ],
         "trade": ["execute_order", "get_account_balance"],
         "chunking": ["get_document_chunks"],
+        "us-macro": [
+            "get_us_economic_growth",
+            "get_us_inflation_employment",
+            "get_us_interest_rates",
+        ],
     }
 
     return tools_by_tag.get(tag, [])
@@ -241,6 +247,7 @@ def get_all_tags() -> set[str]:
         "trade",
         "money-flow",
         "chunking",
+        "us-macro",
         "core",
         "extended",
     }
