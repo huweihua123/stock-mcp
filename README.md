@@ -294,34 +294,48 @@ python scripts/mcp2openapi.py
 
 ### 🏗️ 项目架构
 
-本项目采用 **领域驱动设计 (DDD)** 架构，清晰分离关注点：
+本项目采用 **DDD + 分层架构**，并同时支持 REST 与 MCP 两种协议入口。
 
 ```
 src/server/
 ├── app.py                 # FastAPI + MCP 入口
-├── config/                # 配置管理
-├── core/                  # 核心业务逻辑
-│   ├── bootstrap.py        # 启动初始化（连接/适配器注册）
-│   ├── dependencies.py     # 依赖注入容器
-│   └── use_cases/          # 统一业务用例（MCP/REST 共享）
-├── domain/                # 领域层
-│   ├── adapters/          # 数据适配器（Yahoo, Akshare, Tushare 等）
-│   ├── models/            # 领域模型
-│   └── services/          # 领域服务
-├── infrastructure/        # 基础设施层
-│   ├── cache/             # 缓存（Redis）
-│   └── external/          # 外部 API 客户端
+├── api/                   # REST API 层（routes + request models）
 ├── mcp/                   # MCP 协议层
 │   ├── registry.py        # MCP 工具注册表（单一来源）
 │   └── tools/             # MCP 工具定义
+├── core/                  # 应用层（启动、DI、用例编排）
+│   ├── bootstrap.py        # 启动初始化（连接/适配器注册）
+│   ├── dependencies.py     # 依赖注入容器
+│   └── use_cases/          # 统一业务用例（MCP/REST 共享）
+├── domain/                # 领域层（核心能力）
+│   ├── market_gateway.py   # 统一网关（解析 + 路由入口）
+│   ├── adapter_manager.py  # 多源适配管理与 failover
+│   ├── adapters/          # 数据适配器（Akshare/Tushare/Baostock/Yahoo/Finnhub/CCXT/TwelveData）
+│   ├── symbols/           # 符号标准化（EXCHANGE:SYMBOL）
+│   ├── routing/           # 路由策略 + 健康跟踪 + 冷却
+│   └── security_master/   # 资产主数据（listing/alias/identifier/provider_symbol）
+├── infrastructure/        # 基础设施层
+│   ├── connections/       # Redis/Postgres/Tushare/Finnhub/Baostock 连接
+│   └── cache/             # 缓存封装
+├── config/                # 配置与策略（settings/routing_policy/aliases_seed）
 └── utils/                 # 工具类
 ```
 
 **核心设计原则**:
-- 📦 **适配器模式**: 统一多数据源接口，自动故障转移
+- 📦 **适配器模式**: 统一多数据源接口，屏蔽供应商差异
 - 🔌 **依赖注入**: 使用 `dependency-injector` 管理服务生命周期
-- ⚡ **异步优先**: 所有外部调用均为异步，提升并发性能
-- 🎯 **单一职责**: 每个服务专注于特定领域功能
+- 🧭 **配置化路由**: 按 `asset_type + exchange + data_type` 选择 provider
+- 🛡️ **容错优先**: 健康跟踪 + cooldown + fallback 多层保障
+- 🧩 **符号标准化**: 统一到 `EXCHANGE:SYMBOL`，并沉淀 alias/canonical_id
+
+**请求主链路（简版）**:
+1. API/MCP 接收请求 -> use_case
+2. `MarketGateway` 调 `SymbolResolver` 做标准化与错误语义统一
+3. `SymbolResolver` 持久化主数据（`asset/listing/alias/identifier`）
+4. `MarketRouter` 按策略选源并结合健康状态执行调用
+5. 全部失败回退 `AdapterManager` legacy 路由
+
+完整时序图见: [`docs/request-flow-mermaid.md`](docs/request-flow-mermaid.md)
 
 ### 📄 许可证
 
@@ -610,34 +624,48 @@ While the data retrieval and analysis capabilities are robust, the following fea
 
 ### 🏗️ Project Architecture
 
-This project adopts **Domain-Driven Design (DDD)** architecture with clear separation of concerns:
+This project uses a **DDD + layered architecture** and supports both REST and MCP protocol entry points.
 
 ```
 src/server/
 ├── app.py                 # FastAPI + MCP entry
-├── config/                # Configuration management
-├── core/                  # Core business logic
-│   ├── bootstrap.py        # Bootstrap (connections/adapters)
-│   ├── dependencies.py     # Dependency injection container
-│   └── use_cases/          # Shared use cases (MCP/REST)
-├── domain/                # Domain layer
-│   ├── adapters/          # Data adapters (Yahoo, Akshare, Tushare, etc.)
-│   ├── models/            # Domain models
-│   └── services/          # Domain services
-├── infrastructure/        # Infrastructure layer
-│   ├── cache/             # Caching (Redis)
-│   └── external/          # External API clients
+├── api/                   # REST layer (routes + request models)
 ├── mcp/                   # MCP protocol layer
 │   ├── registry.py        # MCP tool registry (single source of truth)
 │   └── tools/             # MCP tool definitions
+├── core/                  # Application layer (bootstrap, DI, use cases)
+│   ├── bootstrap.py        # Bootstrap (connections/adapters)
+│   ├── dependencies.py     # Dependency injection container
+│   └── use_cases/          # Shared use cases (MCP/REST)
+├── domain/                # Domain layer (core capabilities)
+│   ├── market_gateway.py   # Unified gateway (resolve + route entry)
+│   ├── adapter_manager.py  # Multi-source adapter orchestration + failover
+│   ├── adapters/          # Data adapters (Akshare/Tushare/Baostock/Yahoo/Finnhub/CCXT/TwelveData)
+│   ├── symbols/           # Symbol normalization (EXCHANGE:SYMBOL)
+│   ├── routing/           # Routing policy + health tracking + cooldown
+│   └── security_master/   # Master data (listing/alias/identifier/provider_symbol)
+├── infrastructure/        # Infrastructure layer
+│   ├── connections/       # Redis/Postgres/Tushare/Finnhub/Baostock connections
+│   └── cache/             # Cache wrapper
+├── config/                # Settings and routing policies
 └── utils/                 # Utilities
 ```
 
 **Core Design Principles**:
-- 📦 **Adapter Pattern**: Unified multi-source interface with automatic failover
+- 📦 **Adapter Pattern**: Unified multi-source interface with provider abstraction
 - 🔌 **Dependency Injection**: Using `dependency-injector` for service lifecycle management
-- ⚡ **Async First**: All external calls are asynchronous for improved concurrency
-- 🎯 **Single Responsibility**: Each service focuses on specific domain functionality
+- 🧭 **Policy-Driven Routing**: Provider selection by `asset_type + exchange + data_type`
+- 🛡️ **Resilience by Design**: Health tracking + cooldown + fallback layers
+- 🧩 **Symbol Standardization**: Normalize inputs into `EXCHANGE:SYMBOL` with alias/canonical persistence
+
+**Request Flow (Short Version)**:
+1. API/MCP receives request -> use_case
+2. `MarketGateway` calls `SymbolResolver` for normalization and error semantics
+3. `SymbolResolver` persists master data (`asset/listing/alias/identifier`)
+4. `MarketRouter` selects providers by policy and executes with health checks
+5. If all providers fail, fallback to legacy `AdapterManager` routing
+
+Full sequence diagram: [`docs/request-flow-mermaid.md`](docs/request-flow-mermaid.md)
 
 ### 📄 License
 
