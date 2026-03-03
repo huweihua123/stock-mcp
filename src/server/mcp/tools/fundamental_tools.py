@@ -1016,7 +1016,9 @@ def register_fundamental_tools(mcp: FastMCP):
                 days=days,
             )
 
-            data = await fundamental_use_cases.get_valuation_metrics(symbol, days)
+            data = await fundamental_use_cases.get_valuation_metrics(
+                symbol, days=days
+            )
 
             if data.get("error"):
                 return {"error": data["error"]}
