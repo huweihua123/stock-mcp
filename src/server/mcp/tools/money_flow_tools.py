@@ -561,7 +561,15 @@ def register_money_flow_tools(mcp: FastMCP):
             result["component_type"] = "pmi_data"
 
             content = result.get("data", []) or []
-            content = sorted(content, key=lambda x: str(x.get("month", "")))
+
+            def _month_of(row: Dict[str, Any]) -> str:
+                # Tushare cn_pmi often uses uppercase MONTH.
+                m = row.get("month")
+                if m is None:
+                    m = row.get("MONTH")
+                return str(m or "")
+
+            content = sorted(content, key=_month_of)
             if months > 0:
                 content = content[-months:]
 
@@ -573,14 +581,39 @@ def register_money_flow_tools(mcp: FastMCP):
 
             latest = content[-1] if content else {}
             prev = content[-2] if len(content) >= 2 else {}
-            latest_month = str(latest.get("month") or "N/A")
+            latest_month = _month_of(latest) or "N/A"
 
-            mfg = _to_float(latest.get("pmi"))
-            mfg_prev = _to_float(prev.get("pmi"))
-            non_mfg = _to_float(latest.get("pmi_non_mfg"))
-            non_mfg_prev = _to_float(prev.get("pmi_non_mfg"))
-            composite = _to_float(latest.get("pmi_composite"))
-            composite_prev = _to_float(prev.get("pmi_composite"))
+            def _pick(row: Dict[str, Any], *keys: str) -> Any:
+                for k in keys:
+                    if k in row and row.get(k) is not None:
+                        return row.get(k)
+                return None
+
+            # Field compatibility:
+            # - Generic schema: pmi / pmi_non_mfg / pmi_composite
+            # - Tushare cn_pmi schema: PMI010000 / PMI020200 / PMI030000
+            mfg = _to_float(_pick(latest, "pmi", "PMI010000"))
+            mfg_prev = _to_float(_pick(prev, "pmi", "PMI010000"))
+            non_mfg = _to_float(
+                _pick(
+                    latest,
+                    "pmi_non_mfg",
+                    "pmi_nonmanufacturing",
+                    "PMI020200",
+                    "PMI020000",
+                )
+            )
+            non_mfg_prev = _to_float(
+                _pick(
+                    prev,
+                    "pmi_non_mfg",
+                    "pmi_nonmanufacturing",
+                    "PMI020200",
+                    "PMI020000",
+                )
+            )
+            composite = _to_float(_pick(latest, "pmi_composite", "PMI030000"))
+            composite_prev = _to_float(_pick(prev, "pmi_composite", "PMI030000"))
 
             def _fmt_val(v: float | None) -> str:
                 return f"{v:.1f}" if v is not None else "N/A"
@@ -715,24 +748,33 @@ def register_money_flow_tools(mcp: FastMCP):
 
         try:
             logger.info("MCP tool called: get_social_financing", months=months)
-            result = await money_flow_use_cases.get_social_financing(months)
+            # Keep enough history to derive stock-yoy from stk_endval when upstream
+            # does not provide explicit stk_yoy.
+            fetch_months = max(months, 24)
+            result = await money_flow_use_cases.get_social_financing(fetch_months)
             result["component_type"] = "social_financing"
 
-            data = result.get("data", []) or []
-            # Normalize & slice latest N months (desc)
-            data = sorted(data, key=lambda x: str(x.get("month", "")), reverse=True)
-            if months and months > 0:
-                data = data[:months]
-            content = [
+            raw_data = result.get("data", []) or []
+
+            def _month_of(row: Dict[str, Any]) -> str:
+                m = row.get("month")
+                if m is None:
+                    m = row.get("MONTH")
+                return str(m or "")
+
+            # Normalize rows first so downstream logic has stable keys.
+            normalized = [
                 {
-                    "month": r.get("month"),
+                    "month": _month_of(r),
                     "inc_month": r.get("inc_month"),
                     "inc_cumval": r.get("inc_cumval"),
                     "stk_endval": r.get("stk_endval"),
                     "stk_yoy": r.get("stk_yoy"),
                 }
-                for r in data
+                for r in raw_data
             ]
+            normalized = sorted(normalized, key=lambda x: str(x.get("month", "")), reverse=True)
+            content = normalized[:months] if months and months > 0 else normalized
 
             def _to_float(v: Any) -> float | None:
                 try:
@@ -740,14 +782,37 @@ def register_money_flow_tools(mcp: FastMCP):
                 except (TypeError, ValueError):
                     return None
 
+            def _derive_stk_yoy(row: Dict[str, Any]) -> float | None:
+                direct = _to_float(row.get("stk_yoy"))
+                if direct is not None:
+                    return direct
+
+                month = str(row.get("month") or "")
+                if len(month) != 6 or not month.isdigit():
+                    return None
+
+                prev_year_month = f"{int(month[:4]) - 1:04d}{month[4:]}"
+                base_row = next(
+                    (r for r in normalized if str(r.get("month") or "") == prev_year_month),
+                    None,
+                )
+                if not base_row:
+                    return None
+
+                curr = _to_float(row.get("stk_endval"))
+                base = _to_float(base_row.get("stk_endval"))
+                if curr is None or base is None or base == 0:
+                    return None
+                return (curr / base - 1.0) * 100.0
+
             latest = content[0] if content else {}
             prev = content[1] if len(content) >= 2 else {}
             latest_month = str(latest.get("month") or "N/A")
 
             inc_month = _to_float(latest.get("inc_month"))
             prev_inc_month = _to_float(prev.get("inc_month"))
-            stk_yoy = _to_float(latest.get("stk_yoy"))
-            prev_stk_yoy = _to_float(prev.get("stk_yoy"))
+            stk_yoy = _derive_stk_yoy(latest)
+            prev_stk_yoy = _derive_stk_yoy(prev)
 
             def _fmt_num(v: float | None) -> str:
                 if v is None:
@@ -1330,6 +1395,7 @@ def register_money_flow_tools(mcp: FastMCP):
             total_pct = summary_info.get("total_pct_chg", 0)
             trend = summary_info.get("trend", "")
             total_main = summary_info.get("total_main_net")
+            flow_source = summary_info.get("flow_source")
 
             lines = [
                 f"{index_name}({index_code}) 板块资金流向 (近{len(records)}日):",
@@ -1345,6 +1411,8 @@ def register_money_flow_tools(mcp: FastMCP):
                     return f"{val:.0f}元"
 
                 lines.append(f"- 主力累计净流入: {_fmt(total_main)}")
+                if flow_source:
+                    lines.append(f"- 资金流口径: {flow_source}")
             lines.append(f"- 趋势: {trend}")
             summary_text = "\n".join(lines)
 
@@ -1389,4 +1457,162 @@ def register_money_flow_tools(mcp: FastMCP):
             return {
                 "error": str(e),
                 "component_type": "sector_flow",
+            }
+
+    @mcp.tool(tags={"money-flow"})
+    async def get_sector_valuation_metrics(
+        sector_name: str,
+        days: int = 250,
+        sample_size: int = 60,
+        ctx: Context = None,
+    ) -> Dict[str, Any]:
+        """获取板块估值指标与历史分位（PE/PB）.
+
+        基于板块成分股聚合计算板块层面的 PE(TTM)/PB，并给出历史分位，
+        用于判断板块估值安全边际（低估/合理/高估）。
+        """
+        if ctx:
+            await ctx.info(
+                f"🔧 获取板块估值: {sector_name}",
+                extra={
+                    "sector_name": sector_name,
+                    "days": days,
+                    "sample_size": sample_size,
+                },
+            )
+
+        try:
+            logger.info(
+                "MCP tool called: get_sector_valuation_metrics",
+                sector_name=sector_name,
+                days=days,
+                sample_size=sample_size,
+            )
+            result = await money_flow_use_cases.get_sector_valuation_metrics(
+                sector_name=sector_name,
+                days=days,
+                sample_size=sample_size,
+            )
+
+            if result.get("candidates"):
+                candidates = result.get("candidates", [])
+                summary_text = (
+                    f'板块名称"{sector_name}"不明确，候选：'
+                    f"{'、'.join(candidates)}。请使用精确板块名称重试。"
+                )
+                artifact = create_artifact_envelope(
+                    component_type="sector_valuation_metrics",
+                    name=f"Sector Valuation: {sector_name}",
+                    content={
+                        "sector_name": sector_name,
+                        "index_code": "",
+                        "candidates": candidates,
+                        "history": [],
+                    },
+                    description=summary_text,
+                    metadata={
+                        "type": "sector_valuation_metrics",
+                        "sector_name": sector_name,
+                    },
+                    visible_to_llm=True,
+                    display_in_report=True,
+                )
+                return create_artifact_response(summary=summary_text, artifact=artifact)
+
+            if result.get("error"):
+                summary_text = f"板块估值数据不可用: {result.get('error')}"
+                artifact = create_artifact_envelope(
+                    component_type="sector_valuation_metrics",
+                    name=f"Sector Valuation: {sector_name}",
+                    content={
+                        "sector_name": sector_name,
+                        "index_code": result.get("index_code", ""),
+                        "history": [],
+                        "error": result.get("error"),
+                    },
+                    description=summary_text,
+                    metadata={
+                        "type": "sector_valuation_metrics",
+                        "sector_name": sector_name,
+                    },
+                    visible_to_llm=True,
+                    display_in_report=True,
+                )
+                return create_artifact_response(summary=summary_text, artifact=artifact)
+
+            sector = result.get("sector_name", sector_name)
+            index_code = result.get("index_code", "")
+            current = result.get("current", {}) or {}
+            summary = result.get("summary", {}) or {}
+            history = result.get("history", []) or []
+
+            pe = current.get("pe_ttm")
+            pb = current.get("pb")
+            pe_pct = summary.get("pe_ttm_percentile")
+            pb_pct = summary.get("pb_percentile")
+            level = summary.get("valuation_level", "未知")
+            latest_cov = summary.get("coverage_latest")
+            used = result.get("member_count_used")
+            total = result.get("member_count_total")
+            with_data = result.get("member_count_with_data")
+
+            def _fmt_num(v: Any, nd: int = 2) -> str:
+                if isinstance(v, (int, float)):
+                    return f"{v:.{nd}f}"
+                return "N/A"
+
+            def _fmt_pct(v: Any) -> str:
+                if isinstance(v, (int, float)):
+                    return f"{v:.1f}%"
+                return "N/A"
+
+            summary_text = (
+                f"{sector}({index_code}) 板块估值(近{len(history)}日): "
+                f"PE(TTM)={_fmt_num(pe)}(分位{_fmt_pct(pe_pct)}), "
+                f"PB={_fmt_num(pb)}(分位{_fmt_pct(pb_pct)}), "
+                f"估值判断={level}; 覆盖={latest_cov}/{used} "
+                f"(样本成分{with_data}/{total})"
+            )
+
+            artifact = create_artifact_envelope(
+                component_type="sector_valuation_metrics",
+                name=f"Sector Valuation: {sector}",
+                content={
+                    "sector_name": sector,
+                    "index_code": index_code,
+                    "current": current,
+                    "summary": summary,
+                    "history": history,
+                    "member_count_total": total,
+                    "member_count_used": used,
+                    "member_count_with_data": with_data,
+                },
+                description=summary_text,
+                metadata={
+                    "type": "sector_valuation_metrics",
+                    "sector_name": sector,
+                    "index_code": index_code,
+                    "days": len(history),
+                },
+                visible_to_llm=True,
+                display_in_report=True,
+            )
+
+            if ctx:
+                await ctx.info(
+                    f"✅ 板块估值获取完成: {sector}",
+                    extra={"valuation_level": level, "days": len(history)},
+                )
+
+            return create_artifact_response(summary=summary_text, artifact=artifact)
+        except Exception as e:
+            logger.error(f"Get sector valuation metrics failed: {e}", exc_info=True)
+            if ctx:
+                await ctx.error(
+                    f"❌ 获取板块估值失败: {sector_name}",
+                    extra={"error": str(e)},
+                )
+            return {
+                "error": str(e),
+                "component_type": "sector_valuation_metrics",
             }

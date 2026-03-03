@@ -115,6 +115,23 @@ async def get_sector_money_flow_history(
     return await manager.get_sector_money_flow_history(sector_name, days)
 
 
+async def get_sector_valuation_metrics(
+    sector_name: str, days: int = 250, sample_size: int = 60
+) -> Dict[str, Any]:
+    manager = Container.market_gateway()
+    logger.info(
+        "UseCase: get_sector_valuation_metrics",
+        sector=sector_name,
+        days=days,
+        sample_size=sample_size,
+    )
+    return await manager.get_sector_valuation_metrics(
+        sector_name=sector_name,
+        days=days,
+        sample_size=sample_size,
+    )
+
+
 async def get_ggt_daily(days: int = 60) -> Dict[str, Any]:
     manager = Container.market_gateway()
     logger.info("UseCase: get_ggt_daily", days=days)

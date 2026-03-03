@@ -337,6 +337,14 @@ class BaseDataAdapter(abc.ABC):
             f"{self.source.value} does not support " "get_sector_money_flow_history"
         )
 
+    async def get_sector_valuation_metrics(
+        self, sector_name: str, days: int = 250, sample_size: int = 60
+    ) -> Dict[str, Any]:
+        """获取板块估值指标与历史分位 (Optional)."""
+        raise NotImplementedError(
+            f"{self.source.value} does not support get_sector_valuation_metrics"
+        )
+
     # =========================================================================
     # US-market specific operations (Optional)
     # =========================================================================

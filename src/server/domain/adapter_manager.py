@@ -474,6 +474,16 @@ class AdapterManager:
             "get_sector_money_flow_history", sector_name=sector_name, days=days
         )
 
+    async def get_sector_valuation_metrics(
+        self, sector_name: str, days: int = 250, sample_size: int = 60
+    ) -> Dict[str, Any]:
+        return await self._dispatch_market(
+            "get_sector_valuation_metrics",
+            sector_name=sector_name,
+            days=days,
+            sample_size=sample_size,
+        )
+
     async def get_ggt_daily(self, days: int = 60) -> Dict[str, Any]:
         return await self._dispatch_market("get_ggt_daily", days=days)
 

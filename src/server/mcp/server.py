@@ -194,6 +194,8 @@ def get_tools_by_tag(tag: str) -> list[str]:
             "get_market_liquidity",
             "get_market_money_flow",
             "get_sector_trend",
+            "get_sector_money_flow_history",
+            "get_sector_valuation_metrics",
             "get_ggt_daily",
         ],
         "asset": [

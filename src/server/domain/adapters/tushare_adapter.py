@@ -1769,20 +1769,35 @@ class TushareAdapter(BaseDataAdapter):
                 end_date=end_date.strftime("%Y%m%d"),
             )
 
-            # Step 3: 尝试获取行业资金流向 (moneyflow_ind)
+            # Step 3: 尝试获取行业资金流向（多源回退）
             flow_df = None
-            try:
-                flow_df = await self._run(
-                    client.moneyflow_ind,
-                    ts_code=index_code,
-                    start_date=start_date.strftime("%Y%m%d"),
-                    end_date=end_date.strftime("%Y%m%d"),
-                )
-            except Exception as flow_err:
-                self.logger.warning(
-                    f"moneyflow_ind not available for {sector_name}: "
-                    f"{flow_err}, falling back to ths_daily only"
-                )
+            flow_source = None
+            start_str = start_date.strftime("%Y%m%d")
+            end_str = end_date.strftime("%Y%m%d")
+            flow_attempts = [
+                ("moneyflow_ind", {"ts_code": index_code}),
+                ("moneyflow_ind_ths", {"ts_code": index_code}),
+                ("moneyflow_ind_ths", {"ths_code": index_code}),
+            ]
+
+            for api_name, kwargs in flow_attempts:
+                try:
+                    api = getattr(client, api_name)
+                    df_try = await self._run(
+                        api,
+                        start_date=start_str,
+                        end_date=end_str,
+                        **kwargs,
+                    )
+                    if df_try is not None and not df_try.empty:
+                        flow_df = df_try
+                        flow_source = api_name
+                        break
+                except Exception as flow_err:
+                    self.logger.debug(
+                        f"{api_name} unavailable for {sector_name}/{index_code}: "
+                        f"{flow_err}"
+                    )
 
             # 处理日线行情
             records = []
@@ -1826,6 +1841,48 @@ class TushareAdapter(BaseDataAdapter):
                         ),
                     }
                     records.append(rec)
+
+            # 仍无资金流时，用行业DC口径按日期回补 net_amount
+            if (flow_df is None or flow_df.empty) and records:
+                dc_rows: List[Dict[str, Any]] = []
+                for rec in records:
+                    td = str(rec.get("trade_date", ""))
+                    if not td:
+                        continue
+                    try:
+                        dc_df = await self._run(client.moneyflow_ind_dc, trade_date=td)
+                        if dc_df is None or dc_df.empty:
+                            continue
+                        row = None
+                        if "ts_code" in dc_df.columns:
+                            hit = dc_df[dc_df["ts_code"].astype(str) == index_code]
+                            if not hit.empty:
+                                row = hit.iloc[0]
+                        if row is None and "name" in dc_df.columns:
+                            names = [index_name, sector_name]
+                            hit = dc_df[
+                                dc_df["name"].astype(str).isin([n for n in names if n])
+                            ]
+                            if hit.empty:
+                                hit = dc_df[
+                                    dc_df["name"].astype(str).str.contains(
+                                        str(sector_name), na=False
+                                    )
+                                ]
+                            if not hit.empty:
+                                row = hit.iloc[0]
+                        if row is not None:
+                            item = {k: row.get(k) for k in dc_df.columns}
+                            item["trade_date"] = td
+                            dc_rows.append(item)
+                    except Exception as dc_err:
+                        self.logger.debug(
+                            f"moneyflow_ind_dc fallback failed for {sector_name} "
+                            f"on {td}: {dc_err}"
+                        )
+                if dc_rows:
+                    flow_df = pd.DataFrame(dc_rows)
+                    flow_source = "moneyflow_ind_dc"
 
             # 合并资金流向数据
             if flow_df is not None and not flow_df.empty:
@@ -1874,20 +1931,47 @@ class TushareAdapter(BaseDataAdapter):
                             if pd.notna(row.get("sell_sm_amount"))
                             else 0
                         ),
+                        "net_amount": (
+                            float(row["net_amount"])
+                            if pd.notna(row.get("net_amount"))
+                            else None
+                        ),
+                        "net_amount_rate": (
+                            float(row["net_amount_rate"])
+                            if pd.notna(row.get("net_amount_rate"))
+                            else (
+                                float(row["net_mf_rate"])
+                                if pd.notna(row.get("net_mf_rate"))
+                                else None
+                            )
+                        ),
                     }
                 for rec in records:
                     flow = flow_map.get(rec["trade_date"])
                     if flow:
-                        main_buy = flow["buy_elg_amount"] + flow["buy_lg_amount"]
-                        main_sell = flow["sell_elg_amount"] + flow["sell_lg_amount"]
-                        retail_buy = flow["buy_md_amount"] + flow["buy_sm_amount"]
-                        retail_sell = flow["sell_md_amount"] + flow["sell_sm_amount"]
-                        rec["main_net_inflow"] = round(main_buy - main_sell, 2)
-                        rec["retail_net_inflow"] = round(retail_buy - retail_sell, 2)
-                        rec["total_net_inflow"] = round(
-                            rec["main_net_inflow"] + rec["retail_net_inflow"],
-                            2,
-                        )
+                        net_amount = flow.get("net_amount")
+                        if net_amount is not None:
+                            rec["main_net_inflow"] = round(float(net_amount), 2)
+                            rec["retail_net_inflow"] = None
+                            rec["total_net_inflow"] = round(float(net_amount), 2)
+                            if flow.get("net_amount_rate") is not None:
+                                rec["net_amount_rate"] = round(
+                                    float(flow["net_amount_rate"]),
+                                    2,
+                                )
+                        else:
+                            main_buy = flow["buy_elg_amount"] + flow["buy_lg_amount"]
+                            main_sell = flow["sell_elg_amount"] + flow["sell_lg_amount"]
+                            retail_buy = flow["buy_md_amount"] + flow["buy_sm_amount"]
+                            retail_sell = flow["sell_md_amount"] + flow["sell_sm_amount"]
+                            rec["main_net_inflow"] = round(main_buy - main_sell, 2)
+                            rec["retail_net_inflow"] = round(
+                                retail_buy - retail_sell, 2
+                            )
+                            rec["total_net_inflow"] = round(
+                                rec["main_net_inflow"] + rec["retail_net_inflow"],
+                                2,
+                            )
 
             # 汇总
             has_flow = any("main_net_inflow" in r for r in records)
@@ -1914,6 +1998,7 @@ class TushareAdapter(BaseDataAdapter):
                     "total_pct_chg": round(total_pct_chg, 2),
                     "total_main_net": (round(total_main, 2) if has_flow else None),
                     "trend": trend,
+                    "flow_source": flow_source,
                 },
             }
 
@@ -1925,6 +2010,287 @@ class TushareAdapter(BaseDataAdapter):
                 f"Failed to get sector money flow for " f"{sector_name}: {e}"
             )
             raise ValueError(f"Failed to get sector money flow: {e}")
+
+    async def get_sector_valuation_metrics(
+        self, sector_name: str, days: int = 250, sample_size: int = 60
+    ) -> Dict[str, Any]:
+        """获取板块估值指标(PE/PB)及历史分位.
+
+        数据来源：
+        1) 通过 ths_index + ths_member 解析板块与成分股
+        2) 对成分股批量拉取 daily_basic(PE_TTM/PB/总市值)
+        3) 按交易日聚合为板块加权估值序列，并计算当前历史百分位
+        """
+        safe_days = max(30, min(int(days), 750))
+        safe_sample = max(10, min(int(sample_size), 200))
+        cache_key = (
+            f"tushare:sector_valuation:{sector_name}:{safe_days}:{safe_sample}"
+        )
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        client = self.tushare_conn.get_client()
+        if client is None:
+            raise ValueError("Tushare client not available")
+
+        try:
+            index_code, index_name, candidates = await self._resolve_sector_index(
+                sector_name
+            )
+
+            if index_code is None:
+                if candidates:
+                    return {
+                        "error": f"板块名称 '{sector_name}' 不明确，请从候选中选择",
+                        "candidates": candidates,
+                        "sector_name": sector_name,
+                        "component_type": "sector_valuation_metrics",
+                        "source": "tushare",
+                    }
+                return {
+                    "error": f"未找到板块: {sector_name}",
+                    "sector_name": sector_name,
+                    "component_type": "sector_valuation_metrics",
+                    "source": "tushare",
+                }
+
+            display_name = index_name or sector_name
+
+            member_df = await self._run(client.ths_member, ts_code=index_code)
+            if member_df is None or member_df.empty:
+                return {
+                    "error": f"板块 {display_name} 无成分股数据",
+                    "sector_name": display_name,
+                    "index_code": index_code,
+                    "component_type": "sector_valuation_metrics",
+                    "source": "tushare",
+                }
+
+            member_codes: List[str] = []
+            for col in ("con_code", "code", "ts_code"):
+                if col in member_df.columns:
+                    vals = (
+                        member_df[col]
+                        .astype(str)
+                        .str.upper()
+                        .str.strip()
+                        .tolist()
+                    )
+                    member_codes.extend(vals)
+            member_codes = [
+                x
+                for x in member_codes
+                if x.endswith((".SH", ".SZ", ".BJ")) and len(x) >= 9
+            ]
+            member_codes = list(dict.fromkeys(member_codes))
+            if not member_codes:
+                return {
+                    "error": f"板块 {display_name} 成分股为空",
+                    "sector_name": display_name,
+                    "index_code": index_code,
+                    "component_type": "sector_valuation_metrics",
+                    "source": "tushare",
+                }
+
+            selected_codes = member_codes[:safe_sample]
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=int(safe_days * 1.9))
+            start_str = start_date.strftime("%Y%m%d")
+            end_str = end_date.strftime("%Y%m%d")
+            sem = asyncio.Semaphore(8)
+
+            async def _fetch_one(ts_code: str) -> Optional[pd.DataFrame]:
+                async with sem:
+                    try:
+                        df = await self._run(
+                            client.daily_basic,
+                            ts_code=ts_code,
+                            start_date=start_str,
+                            end_date=end_str,
+                            fields="ts_code,trade_date,pe_ttm,pb,total_mv",
+                        )
+                        if df is None or df.empty:
+                            return None
+                        keep = [
+                            c
+                            for c in ["ts_code", "trade_date", "pe_ttm", "pb", "total_mv"]
+                            if c in df.columns
+                        ]
+                        if not keep:
+                            return None
+                        return df[keep]
+                    except Exception as e:
+                        self.logger.debug(
+                            f"daily_basic failed for {ts_code} in sector "
+                            f"{display_name}: {e}"
+                        )
+                        return None
+
+            frames = [
+                df
+                for df in await asyncio.gather(
+                    *[_fetch_one(code) for code in selected_codes]
+                )
+                if df is not None and not df.empty
+            ]
+            if not frames:
+                return {
+                    "error": f"板块 {display_name} 估值数据为空",
+                    "sector_name": display_name,
+                    "index_code": index_code,
+                    "component_type": "sector_valuation_metrics",
+                    "source": "tushare",
+                    "member_count_total": len(member_codes),
+                    "member_count_used": len(selected_codes),
+                }
+
+            df_all = pd.concat(frames, ignore_index=True)
+            for col in ["pe_ttm", "pb", "total_mv"]:
+                if col in df_all.columns:
+                    df_all[col] = pd.to_numeric(df_all[col], errors="coerce")
+            df_all["trade_date"] = df_all["trade_date"].astype(str)
+            df_all = df_all.dropna(subset=["trade_date", "ts_code"])
+
+            if df_all.empty:
+                return {
+                    "error": f"板块 {display_name} 估值数据为空",
+                    "sector_name": display_name,
+                    "index_code": index_code,
+                    "component_type": "sector_valuation_metrics",
+                    "source": "tushare",
+                }
+
+            def _agg_metric(metric: str) -> pd.Series:
+                data = df_all[["trade_date", "ts_code", metric, "total_mv"]].copy()
+                data = data.dropna(subset=[metric])
+                data = data[data[metric] > 0]
+                if data.empty:
+                    return pd.Series(dtype=float)
+
+                def _reduce(g: pd.DataFrame) -> float:
+                    w = g["total_mv"]
+                    v = g[metric]
+                    mask = w.notna() & (w > 0)
+                    if int(mask.sum()) >= 3:
+                        denom = float(w[mask].sum())
+                        if denom > 0:
+                            return float((v[mask] * w[mask]).sum() / denom)
+                    return float(v.mean())
+
+                return data.groupby("trade_date").apply(_reduce)
+
+            pe_series = _agg_metric("pe_ttm")
+            pb_series = _agg_metric("pb")
+            coverage = df_all.groupby("trade_date")["ts_code"].nunique()
+
+            history_df = pd.DataFrame({"trade_date": coverage.index})
+            history_df = history_df.set_index("trade_date")
+            history_df["coverage"] = coverage.astype(int)
+            if not pe_series.empty:
+                history_df["pe_ttm"] = pe_series
+            if not pb_series.empty:
+                history_df["pb"] = pb_series
+
+            history_df = history_df.sort_index().tail(safe_days)
+            history_df = history_df.reset_index()
+            if history_df.empty:
+                return {
+                    "error": f"板块 {display_name} 历史估值序列为空",
+                    "sector_name": display_name,
+                    "index_code": index_code,
+                    "component_type": "sector_valuation_metrics",
+                    "source": "tushare",
+                }
+
+            def _percentile(series: pd.Series, current: Any) -> Optional[float]:
+                valid = series.dropna()
+                if valid.empty or pd.isna(current):
+                    return None
+                return round(float((valid < current).sum() / len(valid) * 100), 1)
+
+            latest = history_df.iloc[-1]
+            curr_pe = float(latest["pe_ttm"]) if pd.notna(latest.get("pe_ttm")) else None
+            curr_pb = float(latest["pb"]) if pd.notna(latest.get("pb")) else None
+
+            pe_pct = _percentile(history_df.get("pe_ttm", pd.Series(dtype=float)), curr_pe)
+            pb_pct = _percentile(history_df.get("pb", pd.Series(dtype=float)), curr_pb)
+
+            avg_pct = None
+            pct_vals = [v for v in [pe_pct, pb_pct] if v is not None]
+            if pct_vals:
+                avg_pct = sum(pct_vals) / len(pct_vals)
+            if avg_pct is None:
+                level = "未知"
+            elif avg_pct <= 20:
+                level = "低估"
+            elif avg_pct <= 40:
+                level = "偏低"
+            elif avg_pct <= 60:
+                level = "适中"
+            elif avg_pct <= 80:
+                level = "偏高"
+            else:
+                level = "高估"
+
+            history_rows: List[Dict[str, Any]] = []
+            for _, row in history_df.iterrows():
+                history_rows.append(
+                    {
+                        "trade_date": str(row.get("trade_date", "")),
+                        "pe_ttm": (
+                            round(float(row["pe_ttm"]), 4)
+                            if pd.notna(row.get("pe_ttm"))
+                            else None
+                        ),
+                        "pb": (
+                            round(float(row["pb"]), 4)
+                            if pd.notna(row.get("pb"))
+                            else None
+                        ),
+                        "coverage": (
+                            int(row["coverage"])
+                            if pd.notna(row.get("coverage"))
+                            else None
+                        ),
+                    }
+                )
+
+            result = {
+                "component_type": "sector_valuation_metrics",
+                "source": "tushare",
+                "sector_name": display_name,
+                "index_code": index_code,
+                "days": len(history_rows),
+                "member_count_total": len(member_codes),
+                "member_count_used": len(selected_codes),
+                "member_count_with_data": int(df_all["ts_code"].nunique()),
+                "current": {
+                    "trade_date": str(latest.get("trade_date", "")),
+                    "pe_ttm": (round(curr_pe, 4) if curr_pe is not None else None),
+                    "pb": (round(curr_pb, 4) if curr_pb is not None else None),
+                },
+                "summary": {
+                    "valuation_level": level,
+                    "pe_ttm_percentile": pe_pct,
+                    "pb_percentile": pb_pct,
+                    "coverage_latest": (
+                        int(latest.get("coverage"))
+                        if pd.notna(latest.get("coverage"))
+                        else None
+                    ),
+                },
+                "history": history_rows,
+            }
+
+            await self.cache.set(cache_key, result, ttl=1800)
+            return result
+
+        except Exception as e:
+            self.logger.error(
+                f"Failed to get sector valuation metrics for {sector_name}: {e}"
+            )
+            raise ValueError(f"Failed to get sector valuation metrics: {e}")
 
     async def get_technical_indicators(
         self,

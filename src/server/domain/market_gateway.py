@@ -60,6 +60,7 @@ _MARKET_METHODS: Set[str] = {
     "get_market_money_flow",
     "get_sector_trend",
     "get_sector_money_flow_history",
+    "get_sector_valuation_metrics",
     "get_ggt_daily",
     # US sector (market-wide, no symbol)
     "get_us_sector_etf_analysis",
