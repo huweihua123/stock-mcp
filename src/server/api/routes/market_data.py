@@ -297,7 +297,7 @@ async def get_historical_prices(
             "period": request.period,
             "interval": request.interval,
             "count": len(prices),
-            "data": [p.to_dict() for p in prices]
+            "data": prices
         }
         
         logger.info(
