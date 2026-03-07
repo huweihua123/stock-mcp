@@ -39,6 +39,7 @@ class MCPConfig(BaseAppSettings):
 class TushareConfig(BaseAppSettings):
     token: str = Field("", validation_alias="TUSHARE_TOKEN")
     enabled: bool = Field(False, validation_alias="TUSHARE_ENABLED")
+    http_url: str = Field("", validation_alias="TUSHARE_HTTP_URL")
     
     @property
     def is_available(self) -> bool:
@@ -86,6 +87,21 @@ class ProxyConfig(BaseAppSettings):
     enabled: bool = Field(False, validation_alias="PROXY_ENABLED")
 
 
+class TimeoutConfig(BaseAppSettings):
+    """Global timeout configuration."""
+
+    # Top-level MCP tool execution timeout (hard limit)
+    mcp_tool_seconds: float = Field(35.0, validation_alias="MCP_TOOL_TIMEOUT_SECONDS")
+    # Per-provider call timeout used in adapter routing/failover
+    provider_call_seconds: float = Field(
+        12.0, validation_alias="PROVIDER_CALL_TIMEOUT_SECONDS"
+    )
+    # Default HTTP timeout for internal async clients if needed
+    http_request_seconds: float = Field(
+        20.0, validation_alias="HTTP_REQUEST_TIMEOUT_SECONDS"
+    )
+
+
 class PostgresConfig(BaseAppSettings):
     """PostgreSQL configuration for Security Master and other persistence."""
 
@@ -124,6 +140,7 @@ class Settings(BaseAppSettings):
     baostock: BaostockConfig = Field(default_factory=BaostockConfig)
     api_keys: APIKeysConfig = Field(default_factory=APIKeysConfig)
     proxy: ProxyConfig = Field(default_factory=ProxyConfig)
+    timeout: TimeoutConfig = Field(default_factory=TimeoutConfig)
     postgres: PostgresConfig = Field(default_factory=PostgresConfig)
     security_master_backend: str = Field(
         default="auto", validation_alias="SECURITY_MASTER_BACKEND"

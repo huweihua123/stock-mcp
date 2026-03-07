@@ -9,6 +9,7 @@ Aligned with ValueCell's architecture.
 
 import logging
 import threading
+import asyncio
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -43,7 +44,7 @@ class AdapterManager:
     6. Create the MCP tool file and register in registry.py
     """
 
-    def __init__(self):
+    def __init__(self, provider_timeout_seconds: float = 12.0):
         """Initialize adapter manager."""
         self.adapters: Dict[DataSource, BaseDataAdapter] = {}
         self._adapter_order: List[BaseDataAdapter] = []
@@ -51,6 +52,7 @@ class AdapterManager:
         self._ticker_cache: Dict[str, BaseDataAdapter] = {}
         self._cache_lock = threading.Lock()
         self.lock = threading.RLock()
+        self._provider_timeout_seconds = max(float(provider_timeout_seconds), 1.0)
         logger.info("Asset adapter manager initialized")
 
     # =========================================================================
@@ -182,7 +184,10 @@ class AdapterManager:
         last_error: Exception = ValueError(f"No result for {ticker}.{method}")
         for adapter in [primary] + self._get_fallbacks(ticker, primary):
             try:
-                result = await getattr(adapter, method)(ticker, **kwargs)
+                result = await asyncio.wait_for(
+                    getattr(adapter, method)(ticker, **kwargs),
+                    timeout=self._provider_timeout_seconds,
+                )
                 # For methods that return collections, treat empty as "no data"
                 if result is not None:
                     # Allow empty dict/list — callers decide what to do with it
@@ -200,6 +205,14 @@ class AdapterManager:
             except NotImplementedError:
                 logger.debug(
                     f"{adapter.source.value} does not support {method}, skipping"
+                )
+            except asyncio.TimeoutError:
+                last_error = TimeoutError(
+                    f"timeout after {self._provider_timeout_seconds}s"
+                )
+                logger.warning(
+                    f"{adapter.source.value}.{method}({ticker}) timeout in "
+                    f"{self._provider_timeout_seconds}s"
                 )
             except Exception as e:
                 last_error = e
@@ -222,11 +235,22 @@ class AdapterManager:
         last_error: Exception = ValueError(f"No adapter supports {method}")
         for adapter in self._adapter_order:
             try:
-                result = await getattr(adapter, method)(**kwargs)
+                result = await asyncio.wait_for(
+                    getattr(adapter, method)(**kwargs),
+                    timeout=self._provider_timeout_seconds,
+                )
                 if result is not None:
                     return result
             except NotImplementedError:
                 continue
+            except asyncio.TimeoutError:
+                last_error = TimeoutError(
+                    f"timeout after {self._provider_timeout_seconds}s"
+                )
+                logger.warning(
+                    f"{adapter.source.value}.{method}() timeout in "
+                    f"{self._provider_timeout_seconds}s"
+                )
             except Exception as e:
                 last_error = e
                 logger.warning(f"{adapter.source.value}.{method}() failed: {e}")

@@ -27,14 +27,22 @@ Disabled (建议使用专门的 MCP 服务):
 - get_market_report: 市场报告 → 聚合工具，由 Agent 层组合调用
 """
 
+import asyncio
 from contextlib import asynccontextmanager
+from functools import wraps
+from typing import Any
 from fastmcp import FastMCP
 from src.server.core.bootstrap import init_adapters
+from src.server.config.settings import get_settings
 from src.server.utils.logger import logger
 from src.server.mcp.registry import (
     register_tools,
     get_tool_group_info,
     get_enabled_tool_count,
+)
+from src.server.mcp.tools.artifact_utils import (
+    create_artifact_envelope,
+    create_artifact_response,
 )
 
 
@@ -43,12 +51,78 @@ async def mcp_lifespan(mcp: FastMCP):
     """MCP server lifespan - manages Redis connection and adapters."""
     # Startup
     logger.info("🚀 Starting MCP server")
-
-    # Adapters are initialized by FastAPI app lifespan.
+    # Important: stdio / standalone MCP mode does not go through FastAPI lifespan.
+    # init_adapters is idempotent, so calling it here is safe for all modes.
+    await init_adapters()
     yield
 
     # Shutdown
     logger.info("🛑 Shutting down MCP server")
+
+
+def _normalize_tool_result(tool_name: str, result: Any) -> Any:
+    """Ensure error responses include summary for LLM visibility."""
+    if not isinstance(result, dict):
+        return result
+    if "summary" in result:
+        return result
+    if "error" not in result:
+        return result
+
+    reason = str(result.get("error") or "unknown error")
+    summary = f"工具 {tool_name} 执行失败: {reason}"
+    artifact = create_artifact_envelope(
+        component_type=result.get("component_type", "tool_call"),
+        name=f"{tool_name} error",
+        content=result,
+        description=summary,
+        visible_to_llm=True,
+        display_in_report=True,
+    )
+    return create_artifact_response(summary=summary, artifact=artifact)
+
+
+def _install_tool_guard(mcp: FastMCP, tool_timeout_seconds: float) -> None:
+    """Inject global timeout + error-summary normalization for all MCP tools."""
+    original_tool = mcp.tool
+
+    def guarded_tool(*tool_args, **tool_kwargs):
+        base_decorator = original_tool(*tool_args, **tool_kwargs)
+
+        def decorator(func):
+            @wraps(func)
+            async def wrapped(*args, **kwargs):
+                try:
+                    result = await asyncio.wait_for(
+                        func(*args, **kwargs), timeout=tool_timeout_seconds
+                    )
+                    return _normalize_tool_result(func.__name__, result)
+                except asyncio.TimeoutError:
+                    reason = (
+                        f"工具 {func.__name__} 超时: 超过 {tool_timeout_seconds:.1f}s 全局限制"
+                    )
+                    logger.error(reason)
+                    artifact = create_artifact_envelope(
+                        component_type="tool_call",
+                        name=f"{func.__name__} timeout",
+                        content={
+                            "error": "timeout",
+                            "reason": reason,
+                            "tool": func.__name__,
+                            "timeout_seconds": tool_timeout_seconds,
+                            "component_type": "tool_call",
+                        },
+                        description=reason,
+                        visible_to_llm=True,
+                        display_in_report=True,
+                    )
+                    return create_artifact_response(summary=reason, artifact=artifact)
+
+            return base_decorator(wrapped)
+
+        return decorator
+
+    mcp.tool = guarded_tool
 
 
 def create_mcp_server() -> FastMCP:
@@ -74,6 +148,9 @@ def create_mcp_server() -> FastMCP:
     """
     # Create MCP instance with lifespan
     mcp = FastMCP(name="stock-tool-mcp", version="1.0.0", lifespan=mcp_lifespan)
+
+    settings = get_settings()
+    _install_tool_guard(mcp, settings.timeout.mcp_tool_seconds)
 
     # Register all tool groups via registry
     logger.info("📦 Registering tool groups...")
@@ -143,6 +220,8 @@ def create_filtered_mcp_server(
         include_tags=include_tags,
         exclude_tags=exclude_tags,
     )
+    settings = get_settings()
+    _install_tool_guard(mcp, settings.timeout.mcp_tool_seconds)
 
     # Register all tools - FastMCP will filter based on tags
     register_fundamental_tools(mcp)

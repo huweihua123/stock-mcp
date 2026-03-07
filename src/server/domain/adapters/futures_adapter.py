@@ -36,7 +36,7 @@ class FuturesAdapter(BaseDataAdapter):
         super().__init__(DataSource.FUTURES)
         self.cache = cache
         self.logger = logger
-        self.proxy_url = proxy_url or "http://127.0.0.1:7890"
+        self.proxy_url = proxy_url
 
         if self.proxy_url:
             try:

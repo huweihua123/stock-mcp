@@ -6,6 +6,7 @@ All methods are async via asyncio.run_in_executor to avoid blocking.
 
 import asyncio
 import logging
+import time
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
@@ -34,7 +35,7 @@ class YahooAdapter(BaseDataAdapter):
         super().__init__(DataSource.YAHOO)
         self.cache = cache
         self.logger = logger
-        self.proxy_url = proxy_url or "http://127.0.0.1:7890"
+        self.proxy_url = proxy_url
 
         # Configure proxy
         # yfinance 1.0+ uses curl_cffi which requires proxy as dict format
@@ -50,16 +51,7 @@ class YahooAdapter(BaseDataAdapter):
                 )
             except Exception as e:
                 self.logger.warning(
-                    f"⚠️  Failed to set proxy via yf.config: {e}, trying env vars..."
-                )
-                import os
-
-                os.environ["HTTP_PROXY"] = self.proxy_url
-                os.environ["HTTPS_PROXY"] = self.proxy_url
-                os.environ["http_proxy"] = self.proxy_url
-                os.environ["https_proxy"] = self.proxy_url
-                self.logger.info(
-                    f"✅ Yahoo adapter configured with proxy (env vars): {self.proxy_url}"
+                    f"⚠️  Failed to set proxy via yf.config: {e}, continue without global env proxy mutation"
                 )
         else:
             self.logger.info("ℹ️  Yahoo adapter running without proxy")
@@ -564,20 +556,38 @@ class YahooAdapter(BaseDataAdapter):
         self, ticker: str, quarters: int = 8
     ) -> Dict[str, Any]:
         """Fetch EPS history: estimate vs actual and surprise %."""
+        t0 = time.perf_counter()
         cache_key = f"yahoo:earnings:{ticker}:{quarters}"
         cached = await self.cache.get(cache_key)
         if cached:
+            self.logger.info(
+                "yahoo.get_earnings_history cache hit",
+                ticker=ticker,
+                quarters=quarters,
+                elapsed_ms=int((time.perf_counter() - t0) * 1000),
+            )
             return cached
 
         ticker_norm = self._to_yf_ticker(ticker)
         try:
+            t_ticker = time.perf_counter()
             ticker_obj = await self._run(yf.Ticker, ticker_norm)
+            t_fetch = time.perf_counter()
 
             def _fetch():
                 return ticker_obj.earnings_history
 
             raw = await self._run(_fetch)
+            t_parse = time.perf_counter()
             if raw is None or (hasattr(raw, "empty") and raw.empty):
+                self.logger.warning(
+                    "yahoo.get_earnings_history empty response",
+                    ticker=ticker,
+                    ticker_norm=ticker_norm,
+                    build_ticker_ms=int((t_fetch - t_ticker) * 1000),
+                    fetch_ms=int((t_parse - t_fetch) * 1000),
+                    elapsed_ms=int((time.perf_counter() - t0) * 1000),
+                )
                 return {"ticker": ticker, "quarters": []}
 
             rows = []
@@ -604,9 +614,26 @@ class YahooAdapter(BaseDataAdapter):
             rows = rows[-quarters:]
             result = {"ticker": ticker, "quarters": rows}
             await self.cache.set(cache_key, result, ttl=3600)
+            self.logger.info(
+                "yahoo.get_earnings_history success",
+                ticker=ticker,
+                ticker_norm=ticker_norm,
+                quarters=quarters,
+                rows=len(rows),
+                build_ticker_ms=int((t_fetch - t_ticker) * 1000),
+                fetch_ms=int((t_parse - t_fetch) * 1000),
+                parse_cache_ms=int((time.perf_counter() - t_parse) * 1000),
+                elapsed_ms=int((time.perf_counter() - t0) * 1000),
+            )
             return result
         except Exception as e:
-            self.logger.error(f"get_earnings_history failed for {ticker}: {e}")
+            self.logger.error(
+                f"get_earnings_history failed for {ticker}: {e}",
+                ticker=ticker,
+                ticker_norm=ticker_norm,
+                quarters=quarters,
+                elapsed_ms=int((time.perf_counter() - t0) * 1000),
+            )
             raise ValueError(f"get_earnings_history failed for {ticker}: {e}")
 
     async def get_cash_flow_quality(self, ticker: str) -> Dict[str, Any]:

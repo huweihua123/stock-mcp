@@ -97,6 +97,7 @@
    编辑 `.env` 添加你的 API 密钥（可选，但推荐以获得更高限额）:
    - `TUSHARE_ENABLED` - 是否启用 Tushare 数据源（默认 False）
    - `TUSHARE_TOKEN` - 用于 A 股数据（[获取 Token](https://tushare.pro/register)）
+   - `TUSHARE_HTTP_URL` - 可选，自定义 Tushare 接口地址（私有部署/镜像）
    - `FINNHUB_ENABLED` - 是否启用 Finnhub 数据源（默认 False）
    - `FINNHUB_API_KEY` - 用于美股机构数据（[获取 API Key](https://finnhub.io/)）
    - `FRED_API_KEY` - 用于美股宏观指标（GDP/CPI/失业率/利率，免费申请，[获取 API Key](https://fred.stlouisfed.org/docs/api/api_key.html)）
@@ -428,6 +429,7 @@ Optimized for LLM context windows:
    Edit `.env` to add your API keys (optional but recommended for higher limits):
    - `TUSHARE_ENABLED` - Enable Tushare data source (default: False)
    - `TUSHARE_TOKEN` - For China A-shares data ([Get Token](https://tushare.pro/register))
+   - `TUSHARE_HTTP_URL` - Optional custom Tushare endpoint (private deployment/mirror)
    - `FINNHUB_ENABLED` - Enable Finnhub data source (default: False)
    - `FINNHUB_API_KEY` - For US institutional data ([Get API Key](https://finnhub.io/))
    - `FRED_API_KEY` - For US macro indicators (GDP/CPI/Unemployment/Rates, free key, [Get API Key](https://fred.stlouisfed.org/docs/api/api_key.html))

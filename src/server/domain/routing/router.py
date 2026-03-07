@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import time
+import asyncio
 from typing import List, Optional
 
 from src.server.domain.symbols.types import InstrumentRef
@@ -11,11 +12,19 @@ from src.server.utils.logger import logger
 
 
 class MarketRouter:
-    def __init__(self, adapter_manager, security_master_repo, routing_policy, health_tracker):
+    def __init__(
+        self,
+        adapter_manager,
+        security_master_repo,
+        routing_policy,
+        health_tracker,
+        provider_timeout_seconds: float = 12.0,
+    ):
         self._adapters = adapter_manager
         self._repo = security_master_repo
         self._policy = routing_policy
         self._health = health_tracker
+        self._provider_timeout_seconds = max(float(provider_timeout_seconds), 1.0)
 
     async def get_real_time_price(self, instrument: InstrumentRef):
         providers = self._policy.select_providers(
@@ -41,11 +50,17 @@ class MarketRouter:
             start = time.time()
             try:
                 if provider_symbol:
-                    price = await adapter.get_real_time_price_by_provider_symbol(
-                        provider_symbol, internal_ticker=instrument.normalized
+                    price = await asyncio.wait_for(
+                        adapter.get_real_time_price_by_provider_symbol(
+                            provider_symbol, internal_ticker=instrument.normalized
+                        ),
+                        timeout=self._provider_timeout_seconds,
                     )
                 else:
-                    price = await adapter.get_real_time_price(instrument.normalized)
+                    price = await asyncio.wait_for(
+                        adapter.get_real_time_price(instrument.normalized),
+                        timeout=self._provider_timeout_seconds,
+                    )
 
                 latency_ms = (time.time() - start) * 1000
                 if price is None:
@@ -90,16 +105,22 @@ class MarketRouter:
             start = time.time()
             try:
                 if provider_symbol:
-                    prices = await adapter.get_historical_prices_by_provider_symbol(
-                        provider_symbol,
-                        start_date,
-                        end_date,
-                        interval,
-                        internal_ticker=instrument.normalized,
+                    prices = await asyncio.wait_for(
+                        adapter.get_historical_prices_by_provider_symbol(
+                            provider_symbol,
+                            start_date,
+                            end_date,
+                            interval,
+                            internal_ticker=instrument.normalized,
+                        ),
+                        timeout=self._provider_timeout_seconds,
                     )
                 else:
-                    prices = await adapter.get_historical_prices(
-                        instrument.normalized, start_date, end_date, interval
+                    prices = await asyncio.wait_for(
+                        adapter.get_historical_prices(
+                            instrument.normalized, start_date, end_date, interval
+                        ),
+                        timeout=self._provider_timeout_seconds,
                     )
 
                 latency_ms = (time.time() - start) * 1000

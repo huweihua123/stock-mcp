@@ -161,7 +161,13 @@ class Container(containers.DeclarativeContainer):
     # Adapter manager
     from src.server.domain.adapter_manager import AdapterManager
 
-    adapter_manager = providers.Singleton(AdapterManager)
+    adapter_manager = providers.Singleton(
+        AdapterManager,
+        provider_timeout_seconds=providers.Callable(
+            lambda cfg: cfg.timeout.provider_call_seconds,
+            config,
+        ),
+    )
 
     # Security Master
     from src.server.domain.security_master import SecurityMasterRepository
@@ -191,6 +197,10 @@ class Container(containers.DeclarativeContainer):
         security_master_repo=security_master_repo,
         routing_policy=routing_policy,
         health_tracker=provider_health,
+        provider_timeout_seconds=providers.Callable(
+            lambda cfg: cfg.timeout.provider_call_seconds,
+            config,
+        ),
     )
     market_gateway = providers.Singleton(
         MarketGateway,
