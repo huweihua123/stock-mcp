@@ -9,6 +9,7 @@ Active Tools (4):
 """
 
 from typing import Any, Dict
+import time
 
 from fastmcp import FastMCP, Context
 
@@ -22,6 +23,13 @@ from src.server.mcp.tools.artifact_utils import (
     create_symbol_error_response,
 )
 from src.server.domain.symbols.errors import SymbolResolutionError
+
+
+def _is_rate_limited_error(err: Exception) -> bool:
+    """Detect upstream rate-limit errors (HTTP 429 / Too Many Requests)."""
+    msg = str(err).lower()
+    signals = ("429", "too many requests", "rate limit", "rate limited")
+    return any(s in msg for s in signals)
 
 
 def register_us_fundamental_tools(mcp: FastMCP):
@@ -53,10 +61,26 @@ def register_us_fundamental_tools(mcp: FastMCP):
         if ctx:
             await ctx.info(f"📊 获取EPS历史: {symbol} ({quarters}季度)")
         try:
+            t0 = time.perf_counter()
             logger.info(
                 "MCP tool: get_earnings_history", symbol=symbol, quarters=quarters
             )
-            data = await fundamental_use_cases.get_earnings_history(symbol, quarters)
+            if ":" not in symbol:
+                logger.warning(
+                    "get_earnings_history received unqualified symbol, resolver may probe exchanges and become slower",
+                    symbol=symbol,
+                )
+            data = await fundamental_use_cases.get_earnings_history(
+                symbol, quarters=quarters
+            )
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            logger.info(
+                "MCP tool: get_earnings_history finished",
+                symbol=symbol,
+                quarters=quarters,
+                elapsed_ms=elapsed_ms,
+                rows=len(data.get("quarters", [])) if isinstance(data, dict) else 0,
+            )
             rows = data.get("quarters", [])
 
             # Build summary for LLM
@@ -95,12 +119,27 @@ def register_us_fundamental_tools(mcp: FastMCP):
             )
         except Exception as e:
             logger.error("get_earnings_history error", symbol=symbol, error=str(e))
-            summary = f"获取 {symbol} EPS历史失败: {e}"
+            is_rate_limited = _is_rate_limited_error(e)
+            if is_rate_limited:
+                summary = (
+                    f"获取 {symbol} EPS历史失败: 数据源限流(429/Too Many Requests)。"
+                    f"建议 30-120 秒后重试，或降低并发请求。原始错误: {e}"
+                )
+                content = {
+                    "error": str(e),
+                    "rate_limited": True,
+                    "error_code": "RATE_LIMITED",
+                    "retry_after_seconds": 60,
+                }
+            else:
+                summary = f"获取 {symbol} EPS历史失败: {e}"
+                content = {"error": str(e)}
             artifact = create_artifact_envelope(
                 component_type=ComponentType.EARNINGS_TABLE,
                 name=f"{symbol} EPS历史",
-                content={"error": str(e)},
+                content=content,
                 description=summary,
+                metadata={"rate_limited": is_rate_limited},
                 visible_to_llm=True,
             )
             return create_artifact_response(summary=summary, artifact=artifact)

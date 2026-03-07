@@ -151,7 +151,9 @@ def register_us_technical_tools(mcp: FastMCP):
             await ctx.info(f"📊 量价分析: {symbol} ({days}d)")
         try:
             logger.info("MCP tool: get_us_volume_analysis", symbol=symbol, days=days)
-            data = await technical_use_cases.get_us_volume_analysis(symbol, days)
+            data = await technical_use_cases.get_us_volume_analysis(
+                symbol, days=days
+            )
 
             avg_vol = data.get("avg_volume_20d", 0)
             rvol = data.get("rvol")
@@ -235,7 +237,7 @@ def register_us_technical_tools(mcp: FastMCP):
                 interval=interval,
             )
             data = await technical_use_cases.get_us_price_history(
-                symbol, days, interval
+                symbol, days=days, interval=interval
             )
 
             bars = data.get("bars", [])
@@ -320,8 +322,12 @@ def register_us_technical_tools(mcp: FastMCP):
             )
 
             # Fetch price history and volume analysis in parallel
-            price_task = technical_use_cases.get_us_price_history(symbol, days, "1d")
-            vol_task = technical_use_cases.get_us_volume_analysis(symbol, min(days, 30))
+            price_task = technical_use_cases.get_us_price_history(
+                symbol, days=days, interval="1d"
+            )
+            vol_task = technical_use_cases.get_us_volume_analysis(
+                symbol, days=min(days, 30)
+            )
             ind_task = technical_use_cases.calculate_technical_indicators(
                 symbol, period=f"{max(days, 30)}d", interval="1d"
             )

@@ -71,7 +71,7 @@ def register_us_sector_tools(mcp: FastMCP):
                 days=days,
             )
             data = await technical_use_cases.get_us_sector_etf_analysis(
-                sector_name, days
+                sector_name, days=days
             )
 
             etf = data.get("etf_ticker", "SPY")
