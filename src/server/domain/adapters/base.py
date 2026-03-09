@@ -282,7 +282,10 @@ class BaseDataAdapter(abc.ABC):
         )
 
     async def get_market_money_flow(
-        self, trade_date: Optional[str] = None
+        self,
+        trade_date: Optional[str] = None,
+        top_n: int = 20,
+        include_outflow: bool = True,
     ) -> Dict[str, Any]:
         """获取市场资金流向数据 (Optional)."""
         raise NotImplementedError(

@@ -1143,10 +1143,17 @@ class TushareAdapter(BaseDataAdapter):
             raise ValueError(f"Failed to get market liquidity: {e}")
 
     async def get_market_money_flow(
-        self, trade_date: Optional[str] = None
+        self,
+        trade_date: Optional[str] = None,
+        top_n: int = 20,
+        include_outflow: bool = True,
     ) -> Dict[str, Any]:
         """获取市场资金流向数据."""
-        cache_key = f"tushare:market_money_flow:{trade_date or 'latest'}"
+        safe_top_n = max(1, min(int(top_n), 100))
+        cache_key = (
+            "tushare:market_money_flow:"
+            f"{trade_date or 'latest'}:{safe_top_n}:{int(bool(include_outflow))}"
+        )
         cached = await self.cache.get(cache_key)
         if cached:
             return cached
@@ -1155,12 +1162,14 @@ class TushareAdapter(BaseDataAdapter):
         if client is None:
             raise ValueError("Tushare client not available")
 
-        async def _fetch_moneyflow_mkt(dt: str):
+        async def _fetch_moneyflow_mkt(
+            dt: str,
+        ) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
             """先尝试 moneyflow_mkt，失败则降级到 moneyflow_ind_dc。"""
             try:
                 df = await self._run(client.moneyflow_mkt, trade_date=dt)
                 if df is not None and not df.empty:
-                    return df
+                    return df, "moneyflow_mkt"
             except Exception as e1:
                 self.logger.warning(
                     f"moneyflow_mkt failed ({e1}), " f"falling back to moneyflow_ind_dc"
@@ -1168,26 +1177,149 @@ class TushareAdapter(BaseDataAdapter):
             # 降级：用行业资金流向汇总代替
             try:
                 df = await self._run(client.moneyflow_ind_dc, trade_date=dt)
-                return df
+                if df is not None and not df.empty:
+                    return df, "moneyflow_ind_dc"
             except Exception as e2:
                 self.logger.warning(f"moneyflow_ind_dc also failed: {e2}")
-            return None
+            return None, None
 
         try:
+            requested_date = str(trade_date) if trade_date else None
             target_date = trade_date or datetime.now().strftime("%Y%m%d")
-            df = await _fetch_moneyflow_mkt(target_date)
+            actual_fetch_date = target_date
+            df, data_source = await _fetch_moneyflow_mkt(target_date)
             if (df is None or df.empty) and not trade_date:
                 yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
-                df = await _fetch_moneyflow_mkt(yesterday)
+                df, data_source = await _fetch_moneyflow_mkt(yesterday)
+                actual_fetch_date = yesterday
+
+            def _to_float(value: Any) -> Optional[float]:
+                try:
+                    if value is None:
+                        return None
+                    return float(value)
+                except (TypeError, ValueError):
+                    return None
+
+            def _row_net_amount(row: Dict[str, Any]) -> float:
+                for key in ("net_mf_amount", "net_amount", "net_inflow"):
+                    val = _to_float(row.get(key))
+                    if val is not None:
+                        return val
+                return 0.0
+
+            def _row_pct_chg(row: Dict[str, Any]) -> Optional[float]:
+                for key in ("pct_chg", "change_pct", "pct_change", "chg_pct"):
+                    val = _to_float(row.get(key))
+                    if val is not None:
+                        return val
+                return None
+
+            def _row_sector_name(row: Dict[str, Any]) -> str:
+                for key in ("name", "industry", "concept", "ts_code"):
+                    val = row.get(key)
+                    if isinstance(val, str) and val.strip():
+                        return val.strip()
+                return "N/A"
 
             data = []
             if df is not None and not df.empty:
                 data = df.where(df.notnull(), None).to_dict("records")
 
+            as_of_date = None
+            if data:
+                as_of_date = str(data[0].get("trade_date") or "").strip() or None
+            if not as_of_date:
+                as_of_date = actual_fetch_date if data else None
+
+            if not data:
+                data_freshness = "empty"
+            elif requested_date and as_of_date == requested_date:
+                data_freshness = "exact"
+            elif requested_date and as_of_date != requested_date:
+                data_freshness = "fallback_other_trade_date"
+            elif trade_date is None and as_of_date != datetime.now().strftime("%Y%m%d"):
+                data_freshness = "fallback_prev_trade_date"
+            else:
+                data_freshness = "exact"
+
+            normalized_rows: List[Dict[str, Any]] = []
+            for row in data:
+                net = _row_net_amount(row)
+                normalized_rows.append(
+                    {
+                        "sector_name": _row_sector_name(row),
+                        "net_amount": net,
+                        "pct_chg": _row_pct_chg(row),
+                        "trade_date": str(row.get("trade_date") or as_of_date or ""),
+                    }
+                )
+
+            inflow_rows = sorted(
+                [r for r in normalized_rows if r["net_amount"] >= 0],
+                key=lambda x: x["net_amount"],
+                reverse=True,
+            )
+            outflow_rows = sorted(
+                [r for r in normalized_rows if r["net_amount"] < 0],
+                key=lambda x: x["net_amount"],
+            )
+
+            top_inflow = []
+            for idx, row in enumerate(inflow_rows[:safe_top_n], start=1):
+                top_inflow.append(
+                    {
+                        "rank": idx,
+                        "sector_name": row["sector_name"],
+                        "net_amount": row["net_amount"],
+                        "pct_chg": row["pct_chg"],
+                        "trade_date": row["trade_date"],
+                    }
+                )
+
+            top_outflow = []
+            if include_outflow:
+                for idx, row in enumerate(outflow_rows[:safe_top_n], start=1):
+                    top_outflow.append(
+                        {
+                            "rank": idx,
+                            "sector_name": row["sector_name"],
+                            "net_amount": row["net_amount"],
+                            "pct_chg": row["pct_chg"],
+                            "trade_date": row["trade_date"],
+                        }
+                    )
+
+            total_net_amount = sum(r["net_amount"] for r in normalized_rows)
+            trend_conclusion_allowed = data_freshness == "exact" and len(top_inflow) > 0
+            blocked_reason = None
+            if not trend_conclusion_allowed:
+                if not data:
+                    blocked_reason = "market_money_flow_empty"
+                elif data_freshness != "exact":
+                    blocked_reason = f"stale_data:{data_freshness}"
+                else:
+                    blocked_reason = "insufficient_rank_data"
+
             result = {
                 "component_type": "market_money_flow",
                 "source": "tushare",
+                "data_source": data_source or "unknown",
                 "data": data,
+                "requested_trade_date": requested_date,
+                "as_of_trade_date": as_of_date,
+                "data_freshness": data_freshness,
+                "top_n": safe_top_n,
+                "include_outflow": bool(include_outflow),
+                "market_overview": {
+                    "inflow_count": len(inflow_rows),
+                    "outflow_count": len(outflow_rows),
+                    "total_net_amount": total_net_amount,
+                },
+                "top_inflow": top_inflow,
+                "top_outflow": top_outflow,
+                "trend_conclusion_allowed": trend_conclusion_allowed,
+                "blocked_reason": blocked_reason,
             }
             await self.cache.set(cache_key, result, ttl=1800)
             return result

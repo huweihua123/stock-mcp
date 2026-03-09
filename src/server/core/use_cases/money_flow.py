@@ -91,10 +91,23 @@ async def get_market_liquidity(days: int = 60) -> Dict[str, Any]:
     return await manager.get_market_liquidity(days)
 
 
-async def get_market_money_flow(trade_date: Optional[str] = None) -> Dict[str, Any]:
+async def get_market_money_flow(
+    trade_date: Optional[str] = None,
+    top_n: int = 20,
+    include_outflow: bool = True,
+) -> Dict[str, Any]:
     manager = Container.market_gateway()
-    logger.info("UseCase: get_market_money_flow", trade_date=trade_date)
-    return await manager.get_market_money_flow(trade_date)
+    logger.info(
+        "UseCase: get_market_money_flow",
+        trade_date=trade_date,
+        top_n=top_n,
+        include_outflow=include_outflow,
+    )
+    return await manager.get_market_money_flow(
+        trade_date=trade_date,
+        top_n=top_n,
+        include_outflow=include_outflow,
+    )
 
 
 async def get_sector_trend(sector_name: str, days: int = 10) -> Dict[str, Any]:

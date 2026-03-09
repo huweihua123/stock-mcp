@@ -478,10 +478,16 @@ class AdapterManager:
         return await self._dispatch_market("get_market_liquidity", days=days)
 
     async def get_market_money_flow(
-        self, trade_date: Optional[str] = None
+        self,
+        trade_date: Optional[str] = None,
+        top_n: int = 20,
+        include_outflow: bool = True,
     ) -> Dict[str, Any]:
         return await self._dispatch_market(
-            "get_market_money_flow", trade_date=trade_date
+            "get_market_money_flow",
+            trade_date=trade_date,
+            top_n=top_n,
+            include_outflow=include_outflow,
         )
 
     async def get_sector_trend(

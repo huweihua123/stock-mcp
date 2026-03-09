@@ -21,6 +21,7 @@ from src.server.mcp.tools.artifact_utils import (
     create_artifact_list_response,
     ComponentType,
     create_chart_artifact,
+    create_table_artifact,
     create_symbol_error_response,
 )
 from src.server.domain.symbols.errors import SymbolResolutionError
@@ -1145,33 +1146,81 @@ def register_money_flow_tools(mcp: FastMCP):
 
     @mcp.tool(tags={"money-flow"})
     async def get_market_money_flow(
-        trade_date: str = None, ctx: Context = None
+        trade_date: str = None,
+        top_n: int = 20,
+        include_outflow: bool = True,
+        ctx: Context = None,
     ) -> Dict[str, Any]:
-        """获取板块资金流向统计."""
+        """获取板块资金流向统计（含净流入TopN与数据新鲜度门禁）."""
         if ctx:
-            await ctx.info("🔧 获取板块资金流向", extra={"trade_date": trade_date})
+            await ctx.info(
+                "🔧 获取板块资金流向",
+                extra={
+                    "trade_date": trade_date,
+                    "top_n": top_n,
+                    "include_outflow": include_outflow,
+                },
+            )
 
         try:
             logger.info("MCP tool called: get_market_money_flow", trade_date=trade_date)
-            result = await money_flow_use_cases.get_market_money_flow(trade_date)
+            result = await money_flow_use_cases.get_market_money_flow(
+                trade_date=trade_date,
+                top_n=top_n,
+                include_outflow=include_outflow,
+            )
             result["component_type"] = "market_money_flow"
 
-            data = result.get("data", [])
-            total_net = 0.0
-            inflow = 0
-            outflow = 0
-            for row in data:
-                net = row.get("net_mf_amount") or row.get("net_amount") or 0
-                total_net += net
-                if net >= 0:
-                    inflow += 1
-                else:
-                    outflow += 1
+            requested_trade_date = result.get("requested_trade_date") or trade_date
+            as_of_trade_date = result.get("as_of_trade_date")
+            data_freshness = result.get("data_freshness", "unknown")
+            top_n_effective = int(result.get("top_n") or top_n or 20)
+            overview = result.get("market_overview", {})
+            total_net = overview.get("total_net_amount", 0.0) or 0.0
+            inflow = overview.get("inflow_count", 0) or 0
+            outflow = overview.get("outflow_count", 0) or 0
+            top_inflow = result.get("top_inflow", []) or []
+            top_outflow = result.get("top_outflow", []) or []
+            gate_allowed = bool(result.get("trend_conclusion_allowed", False))
+            blocked_reason = result.get("blocked_reason")
 
-            summary_text = (
-                f"板块资金流向（{trade_date or '最新'}）：净流入{inflow}个、净流出{outflow}个，"
-                f"全市场净流入 {total_net:.2f}"
+            freshness_suffix = ""
+            if requested_trade_date and as_of_trade_date and requested_trade_date != as_of_trade_date:
+                freshness_suffix = (
+                    f"（请求{requested_trade_date}，实际返回{as_of_trade_date}）"
+                )
+            elif as_of_trade_date:
+                freshness_suffix = f"（数据日期{as_of_trade_date}）"
+
+            gate_text = (
+                "趋势结论门禁=PASS"
+                if gate_allowed
+                else f"趋势结论门禁=BLOCKED({blocked_reason or 'insufficient_data'})"
             )
+            summary_text = (
+                f"板块资金流向Top{top_n_effective}（{requested_trade_date or '最新'}）{freshness_suffix}: "
+                f"净流入{inflow}个、净流出{outflow}个，全市场净流入 {total_net:.2f}; "
+                f"data_freshness={data_freshness}; {gate_text}"
+            )
+
+            inflow_rows = [
+                {
+                    "rank": r.get("rank"),
+                    "sector_name": r.get("sector_name"),
+                    "net_amount": r.get("net_amount"),
+                    "pct_chg": r.get("pct_chg"),
+                }
+                for r in top_inflow
+            ]
+            outflow_rows = [
+                {
+                    "rank": r.get("rank"),
+                    "sector_name": r.get("sector_name"),
+                    "net_amount": r.get("net_amount"),
+                    "pct_chg": r.get("pct_chg"),
+                }
+                for r in top_outflow
+            ]
 
             artifacts = [
                 create_chart_artifact(
@@ -1186,18 +1235,77 @@ def register_money_flow_tools(mcp: FastMCP):
                             "type": "bar",
                             "data": [
                                 {
-                                    "x": r.get("name") or r.get("industry"),
-                                    "y": r.get("net_mf_amount") or r.get("net_amount"),
+                                    "x": r.get("sector_name"),
+                                    "y": r.get("net_amount"),
                                 }
-                                for r in data
+                                for r in inflow_rows
                             ],
                         }
                     ],
-                    description="板块资金流向分布",
-                    metadata={"type": "chart", "dataset": "market_money_flow"},
+                    description="板块净流入 TopN",
+                    metadata={
+                        "type": "chart",
+                        "dataset": "market_money_flow_top_inflow",
+                        "requested_trade_date": requested_trade_date,
+                        "as_of_trade_date": as_of_trade_date,
+                        "data_freshness": data_freshness,
+                        "trend_conclusion_allowed": gate_allowed,
+                        "blocked_reason": blocked_reason,
+                    },
                     name="Market Money Flow",
-                )
+                ),
+                create_table_artifact(
+                    title=f"板块资金净流入 Top{top_n_effective}",
+                    columns=[
+                        {"key": "rank", "label": "排名"},
+                        {"key": "sector_name", "label": "板块"},
+                        {"key": "net_amount", "label": "净流入"},
+                        {"key": "pct_chg", "label": "涨跌幅(%)"},
+                    ],
+                    rows=inflow_rows,
+                    tag="market_money_flow_top_inflow",
+                    description="Market sector capital inflow ranking",
+                ),
             ]
+            if include_outflow:
+                artifacts.append(
+                    create_table_artifact(
+                        title=f"板块资金净流出 Top{top_n_effective}",
+                        columns=[
+                            {"key": "rank", "label": "排名"},
+                            {"key": "sector_name", "label": "板块"},
+                            {"key": "net_amount", "label": "净流出"},
+                            {"key": "pct_chg", "label": "涨跌幅(%)"},
+                        ],
+                        rows=outflow_rows,
+                        tag="market_money_flow_top_outflow",
+                        description="Market sector capital outflow ranking",
+                    )
+                )
+
+            artifacts.append(
+                create_artifact_envelope(
+                    component_type="market_money_flow_gate",
+                    name="Market Money Flow Gate",
+                    content={
+                        "requested_trade_date": requested_trade_date,
+                        "as_of_trade_date": as_of_trade_date,
+                        "data_freshness": data_freshness,
+                        "trend_conclusion_allowed": gate_allowed,
+                        "blocked_reason": blocked_reason,
+                        "top_n": top_n_effective,
+                        "inflow_count": inflow,
+                        "outflow_count": outflow,
+                    },
+                    description=(
+                        "Trend conclusion gate derived from market money flow freshness "
+                        "and rank coverage."
+                    ),
+                    metadata={"type": "market_money_flow_gate"},
+                    visible_to_llm=True,
+                    display_in_report=True,
+                )
+            )
 
             return create_artifact_list_response(
                 summary=summary_text, artifacts=artifacts
