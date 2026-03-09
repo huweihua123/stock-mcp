@@ -7,7 +7,7 @@ the event loop.
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
@@ -83,6 +83,142 @@ class AkshareAdapter(BaseDataAdapter):
     async def _run(self, func, *args, **kwargs):
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
+
+    @staticmethod
+    def _safe_float(value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        text = str(value).strip().replace(",", "")
+        if not text:
+            return None
+        try:
+            return float(text)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _to_trade_date_yyyymmdd(value: Any) -> str:
+        if value is None:
+            return ""
+        text = str(value).strip()
+        if not text:
+            return ""
+        text = text.replace("/", "-")
+        if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+            return text[:10].replace("-", "")
+        if len(text) == 8 and text.isdigit():
+            return text
+        try:
+            dt = datetime.fromisoformat(text)
+            return dt.strftime("%Y%m%d")
+        except Exception:
+            return text.replace("-", "")
+
+    async def _get_board_catalog(self) -> List[Dict[str, str]]:
+        """Get unified industry/concept board name catalog with cache."""
+        cache_key = "akshare:board_catalog:v1"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        catalog: List[Dict[str, str]] = []
+        try:
+            ind_df, concept_df = await asyncio.gather(
+                self._run(ak.stock_board_industry_name_em),
+                self._run(ak.stock_board_concept_name_em),
+                return_exceptions=True,
+            )
+            if isinstance(ind_df, pd.DataFrame) and not ind_df.empty:
+                for _, row in ind_df.iterrows():
+                    name = str(row.get("板块名称", "")).strip()
+                    code = str(row.get("板块代码", "")).strip()
+                    if name:
+                        catalog.append(
+                            {
+                                "name": name,
+                                "code": code,
+                                "board_type": "industry",
+                            }
+                        )
+            if isinstance(concept_df, pd.DataFrame) and not concept_df.empty:
+                for _, row in concept_df.iterrows():
+                    name = str(row.get("板块名称", "")).strip()
+                    code = str(row.get("板块代码", "")).strip()
+                    if name:
+                        catalog.append(
+                            {
+                                "name": name,
+                                "code": code,
+                                "board_type": "concept",
+                            }
+                        )
+        except Exception as e:
+            self.logger.warning(f"Failed to build AK board catalog: {e}")
+
+        if catalog:
+            await self.cache.set(cache_key, catalog, ttl=3600)
+        return catalog
+
+    async def _resolve_board(
+        self, sector_name: str
+    ) -> tuple[Optional[Dict[str, str]], Optional[List[str]]]:
+        """Resolve board by exact/fuzzy matching."""
+        catalog = await self._get_board_catalog()
+        if not catalog:
+            return None, None
+
+        exact = [x for x in catalog if x["name"] == sector_name]
+        if len(exact) == 1:
+            return exact[0], None
+        if len(exact) > 1:
+            return exact[0], None
+
+        contains = [x for x in catalog if sector_name and sector_name in x["name"]]
+        if len(contains) == 1:
+            return contains[0], None
+        if len(contains) > 1:
+            return None, [x["name"] for x in contains[:10]]
+
+        reverse = [
+            x
+            for x in catalog
+            if len(x["name"]) >= 2 and x["name"] in sector_name
+        ]
+        if len(reverse) == 1:
+            return reverse[0], None
+        if len(reverse) > 1:
+            reverse_sorted = sorted(reverse, key=lambda x: len(x["name"]), reverse=True)
+            return reverse_sorted[0], None
+
+        return None, None
+
+    async def _fetch_board_hist(
+        self, board: Dict[str, str], days: int
+    ) -> pd.DataFrame:
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=max(days * 3, 40))
+        symbol = board["name"]
+        if board.get("board_type") == "industry":
+            df = await self._run(
+                ak.stock_board_industry_hist_em,
+                symbol=symbol,
+                start_date=start_date.strftime("%Y%m%d"),
+                end_date=end_date.strftime("%Y%m%d"),
+                period="日k",
+                adjust="",
+            )
+        else:
+            df = await self._run(
+                ak.stock_board_concept_hist_em,
+                symbol=symbol,
+                period="daily",
+                start_date=start_date.strftime("%Y%m%d"),
+                end_date=end_date.strftime("%Y%m%d"),
+                adjust="",
+            )
+        return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
 
     def _to_ak_code(self, ticker: str) -> str:
         return self.convert_to_source_ticker(ticker)
@@ -297,6 +433,449 @@ class AkshareAdapter(BaseDataAdapter):
         except Exception as e:
             self.logger.error(f"Failed to fetch history for {ticker}: {e}")
             return []
+
+    async def get_market_money_flow(
+        self,
+        trade_date: Optional[str] = None,
+        top_n: int = 20,
+        include_outflow: bool = True,
+    ) -> Dict[str, Any]:
+        """Get sector money flow ranking via AkShare Eastmoney endpoints."""
+        safe_top_n = max(1, min(int(top_n), 100))
+        cache_key = (
+            f"akshare:market_money_flow:{trade_date or 'latest'}:"
+            f"{safe_top_n}:{int(bool(include_outflow))}"
+        )
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        requested_date = str(trade_date) if trade_date else None
+        as_of_date = datetime.now().strftime("%Y%m%d")
+        data_freshness = "exact"
+        if requested_date and requested_date != as_of_date:
+            data_freshness = "fallback_other_trade_date"
+
+        try:
+            df = await self._run(
+                ak.stock_sector_fund_flow_rank,
+                indicator="今日",
+                sector_type="行业资金流",
+            )
+            if df is None or df.empty:
+                result = {
+                    "component_type": "market_money_flow",
+                    "source": "akshare",
+                    "data_source": "stock_sector_fund_flow_rank",
+                    "data": [],
+                    "requested_trade_date": requested_date,
+                    "as_of_trade_date": as_of_date,
+                    "data_freshness": "empty",
+                    "top_n": safe_top_n,
+                    "include_outflow": bool(include_outflow),
+                    "market_overview": {
+                        "inflow_count": 0,
+                        "outflow_count": 0,
+                        "total_net_amount": 0.0,
+                    },
+                    "top_inflow": [],
+                    "top_outflow": [],
+                    "trend_conclusion_allowed": False,
+                    "blocked_reason": "market_money_flow_empty",
+                }
+                await self.cache.set(cache_key, result, ttl=1800)
+                return result
+
+            name_col = "名称" if "名称" in df.columns else "行业"
+            net_col = (
+                "今日主力净流入-净额"
+                if "今日主力净流入-净额" in df.columns
+                else ("净额" if "净额" in df.columns else None)
+            )
+            pct_col = (
+                "今日涨跌幅"
+                if "今日涨跌幅" in df.columns
+                else ("行业-涨跌幅" if "行业-涨跌幅" in df.columns else "涨跌幅")
+            )
+            if net_col is None:
+                raise ValueError("No net amount column in stock_sector_fund_flow_rank")
+
+            rows: List[Dict[str, Any]] = []
+            for _, row in df.iterrows():
+                name = str(row.get(name_col, "")).strip()
+                if not name:
+                    continue
+                net_amount = self._safe_float(row.get(net_col))
+                if net_amount is None:
+                    continue
+                pct = self._safe_float(row.get(pct_col))
+                rows.append(
+                    {
+                        "name": name,
+                        "net_mf_amount": net_amount,
+                        "pct_chg": pct,
+                        "trade_date": as_of_date,
+                    }
+                )
+
+            inflow_rows = sorted(
+                [r for r in rows if (r.get("net_mf_amount") or 0) >= 0],
+                key=lambda x: x.get("net_mf_amount", 0),
+                reverse=True,
+            )
+            outflow_rows = sorted(
+                [r for r in rows if (r.get("net_mf_amount") or 0) < 0],
+                key=lambda x: x.get("net_mf_amount", 0),
+            )
+            top_inflow = [
+                {
+                    "rank": idx,
+                    "sector_name": r.get("name"),
+                    "net_amount": r.get("net_mf_amount"),
+                    "pct_chg": r.get("pct_chg"),
+                    "trade_date": r.get("trade_date"),
+                }
+                for idx, r in enumerate(inflow_rows[:safe_top_n], start=1)
+            ]
+            top_outflow = (
+                [
+                    {
+                        "rank": idx,
+                        "sector_name": r.get("name"),
+                        "net_amount": r.get("net_mf_amount"),
+                        "pct_chg": r.get("pct_chg"),
+                        "trade_date": r.get("trade_date"),
+                    }
+                    for idx, r in enumerate(outflow_rows[:safe_top_n], start=1)
+                ]
+                if include_outflow
+                else []
+            )
+
+            total_net_amount = sum(float(r.get("net_mf_amount", 0)) for r in rows)
+            trend_conclusion_allowed = data_freshness == "exact" and len(top_inflow) > 0
+            blocked_reason = None
+            if not trend_conclusion_allowed:
+                if not rows:
+                    blocked_reason = "market_money_flow_empty"
+                elif data_freshness != "exact":
+                    blocked_reason = f"stale_data:{data_freshness}"
+                else:
+                    blocked_reason = "insufficient_rank_data"
+
+            result = {
+                "component_type": "market_money_flow",
+                "source": "akshare",
+                "data_source": "stock_sector_fund_flow_rank",
+                "data": rows,
+                "requested_trade_date": requested_date,
+                "as_of_trade_date": as_of_date,
+                "data_freshness": data_freshness,
+                "top_n": safe_top_n,
+                "include_outflow": bool(include_outflow),
+                "market_overview": {
+                    "inflow_count": len(inflow_rows),
+                    "outflow_count": len(outflow_rows),
+                    "total_net_amount": total_net_amount,
+                },
+                "top_inflow": top_inflow,
+                "top_outflow": top_outflow,
+                "trend_conclusion_allowed": trend_conclusion_allowed,
+                "blocked_reason": blocked_reason,
+            }
+            await self.cache.set(cache_key, result, ttl=900)
+            return result
+        except Exception as e:
+            self.logger.warning(f"Akshare get_market_money_flow failed: {e}")
+            raise ValueError(f"Failed to get market money flow: {e}")
+
+    async def get_sector_trend(
+        self, sector_name: str, days: int = 10
+    ) -> Dict[str, Any]:
+        """Get sector trend with fuzzy board resolution via AkShare."""
+        cache_key = f"akshare:sector_trend:{sector_name}:{days}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        board, candidates = await self._resolve_board(sector_name)
+        if board is None:
+            if candidates:
+                return {
+                    "error": f"板块名称 '{sector_name}' 不明确，请从以下候选中选择",
+                    "candidates": candidates,
+                    "sector_name": sector_name,
+                    "component_type": "sector_trend",
+                    "source": "akshare",
+                }
+            raise ValueError(f"No sector index found for '{sector_name}'")
+
+        try:
+            hist_df = await self._fetch_board_hist(board, days)
+            if hist_df is None or hist_df.empty:
+                raise ValueError(f"No sector daily data for {board['name']}")
+
+            hist_df = hist_df.sort_values("日期").tail(days)
+            trend: List[Dict[str, Any]] = []
+            total_pct_chg = 0.0
+            for _, row in hist_df.iterrows():
+                pct = self._safe_float(row.get("涨跌幅")) or 0.0
+                total_pct_chg += pct
+                trend.append(
+                    {
+                        "ts_code": board.get("code", ""),
+                        "trade_date": self._to_trade_date_yyyymmdd(row.get("日期")),
+                        "open": self._safe_float(row.get("开盘")),
+                        "high": self._safe_float(row.get("最高")),
+                        "low": self._safe_float(row.get("最低")),
+                        "close": self._safe_float(row.get("收盘")),
+                        "change": self._safe_float(row.get("涨跌额")),
+                        "pct_chg": pct,
+                        "vol": self._safe_float(row.get("成交量")),
+                        "turnover_rate": self._safe_float(row.get("换手率")),
+                    }
+                )
+
+            result = {
+                "component_type": "sector_trend",
+                "source": "akshare",
+                "sector_name": board["name"],
+                "days": len(trend),
+                "total_pct_chg": round(total_pct_chg, 4),
+                "trend": trend,
+            }
+            await self.cache.set(cache_key, result, ttl=1800)
+            return result
+        except Exception as e:
+            self.logger.warning(f"Akshare get_sector_trend failed for {sector_name}: {e}")
+            raise ValueError(f"Failed to get sector trend: {e}")
+
+    async def get_sector_money_flow_history(
+        self, sector_name: str, days: int = 20
+    ) -> Dict[str, Any]:
+        """Get sector price + capital flow history via AkShare."""
+        cache_key = f"akshare:sector_money_flow:{sector_name}:{days}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        board, candidates = await self._resolve_board(sector_name)
+        if board is None:
+            if candidates:
+                return {
+                    "error": f"板块名称 '{sector_name}' 不明确，请从以下候选中选择",
+                    "candidates": candidates,
+                    "sector_name": sector_name,
+                    "component_type": "sector_flow",
+                    "source": "akshare",
+                }
+            return {
+                "error": f"未找到板块: {sector_name}",
+                "sector_name": sector_name,
+                "component_type": "sector_flow",
+                "source": "akshare",
+            }
+
+        try:
+            hist_df = await self._fetch_board_hist(board, days)
+            if hist_df is None or hist_df.empty:
+                raise ValueError(f"No sector daily data for {board['name']}")
+            hist_df = hist_df.sort_values("日期").tail(days)
+
+            flow_map: Dict[str, Dict[str, Any]] = {}
+            flow_source = None
+            try:
+                flow_df = await self._run(
+                    ak.stock_sector_fund_flow_hist, symbol=board["name"]
+                )
+                if isinstance(flow_df, pd.DataFrame) and not flow_df.empty:
+                    flow_source = "stock_sector_fund_flow_hist"
+                    flow_df = flow_df.sort_values("日期")
+                    for _, row in flow_df.iterrows():
+                        td = self._to_trade_date_yyyymmdd(row.get("日期"))
+                        flow_map[td] = {
+                            "main_net_inflow": self._safe_float(
+                                row.get("主力净流入-净额")
+                            ),
+                            "net_amount_rate": self._safe_float(
+                                row.get("主力净流入-净占比")
+                            ),
+                        }
+            except Exception as flow_err:
+                self.logger.debug(
+                    f"Akshare sector flow history unavailable for {board['name']}: {flow_err}"
+                )
+
+            records: List[Dict[str, Any]] = []
+            for _, row in hist_df.iterrows():
+                td = self._to_trade_date_yyyymmdd(row.get("日期"))
+                rec = {
+                    "trade_date": td,
+                    "close": self._safe_float(row.get("收盘")),
+                    "pct_chg": self._safe_float(row.get("涨跌幅")),
+                    "vol": self._safe_float(row.get("成交量")),
+                    "turnover_rate": self._safe_float(row.get("换手率")),
+                }
+                flow = flow_map.get(td)
+                if flow and flow.get("main_net_inflow") is not None:
+                    rec["main_net_inflow"] = round(float(flow["main_net_inflow"]), 2)
+                    rec["retail_net_inflow"] = None
+                    rec["total_net_inflow"] = round(float(flow["main_net_inflow"]), 2)
+                    if flow.get("net_amount_rate") is not None:
+                        rec["net_amount_rate"] = round(float(flow["net_amount_rate"]), 2)
+                records.append(rec)
+
+            has_flow = any("main_net_inflow" in r for r in records)
+            total_main = sum(float(r.get("main_net_inflow", 0)) for r in records)
+            total_pct_chg = sum(float(r.get("pct_chg", 0) or 0) for r in records)
+            if has_flow:
+                trend = "主力资金持续流入" if total_main > 0 else "主力资金持续流出"
+            else:
+                trend = "仅行情数据"
+
+            result = {
+                "component_type": "sector_money_flow",
+                "source": "akshare",
+                "sector_name": board["name"],
+                "index_code": board.get("code", ""),
+                "days": len(records),
+                "has_money_flow": has_flow,
+                "amount_unit": "unknown",
+                "records": records,
+                "summary": {
+                    "total_pct_chg": round(total_pct_chg, 2),
+                    "total_main_net": (round(total_main, 2) if has_flow else None),
+                    "trend": trend,
+                    "flow_source": flow_source,
+                    "amount_unit": "unknown",
+                },
+            }
+            await self.cache.set(cache_key, result, ttl=1800)
+            return result
+        except Exception as e:
+            self.logger.warning(
+                f"Akshare get_sector_money_flow_history failed for {sector_name}: {e}"
+            )
+            raise ValueError(f"Failed to get sector money flow: {e}")
+
+    async def get_north_bound_flow(self, days: int = 30) -> Dict[str, Any]:
+        """Get north-bound flow series via AkShare."""
+        cache_key = f"akshare:hsgt:{days}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        try:
+            df = await self._run(ak.stock_hsgt_hist_em)
+            if df is None or df.empty:
+                return {"error": "No north bound flow data", "source": "akshare"}
+            df = df.copy()
+            if "日期" not in df.columns:
+                raise ValueError("No 日期 column in stock_hsgt_hist_em")
+            df["日期"] = df["日期"].astype(str)
+            df = df.sort_values("日期").tail(days)
+
+            dates = [str(x) for x in df["日期"].tolist()]
+            total = [
+                self._safe_float(v) or 0.0
+                for v in df.get("当日成交净买额", pd.Series(dtype=float)).tolist()
+            ]
+
+            result = {
+                "component_type": "north_bound_flow",
+                "source": "akshare",
+                "data": {
+                    "dates": dates,
+                    "hk_to_sh": [0.0 for _ in dates],
+                    "hk_to_sz": [0.0 for _ in dates],
+                    "total": total,
+                },
+                "summary": {
+                    "total_net": round(sum(total), 2),
+                    "period_days": len(dates),
+                },
+            }
+            await self.cache.set(cache_key, result, ttl=1800)
+            return result
+        except Exception as e:
+            self.logger.warning(f"Akshare get_north_bound_flow failed: {e}")
+            raise ValueError(f"Failed to get north bound flow: {e}")
+
+    async def get_market_liquidity(self, days: int = 60) -> Dict[str, Any]:
+        """Get market liquidity (north flow + margin) via AkShare."""
+        cache_key = f"akshare:market_liquidity:{days}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        try:
+            north_result = await self.get_north_bound_flow(days)
+            north_flow: List[Dict[str, Any]] = []
+            if isinstance(north_result, dict) and north_result.get("data"):
+                nd = north_result["data"]
+                dates = nd.get("dates") or []
+                totals = nd.get("total") or []
+                hk_to_sh = nd.get("hk_to_sh") or [0.0] * len(dates)
+                hk_to_sz = nd.get("hk_to_sz") or [0.0] * len(dates)
+                for i, d in enumerate(dates):
+                    north_flow.append(
+                        {
+                            "trade_date": self._to_trade_date_yyyymmdd(d),
+                            "hgt": hk_to_sh[i] if i < len(hk_to_sh) else 0.0,
+                            "sgt": hk_to_sz[i] if i < len(hk_to_sz) else 0.0,
+                            "north_money": totals[i] if i < len(totals) else 0.0,
+                        }
+                    )
+
+            margin: List[Dict[str, Any]] = []
+            sh_df, sz_df = await asyncio.gather(
+                self._run(ak.macro_china_market_margin_sh),
+                self._run(ak.macro_china_market_margin_sz),
+                return_exceptions=True,
+            )
+            merged: Dict[str, Dict[str, float]] = {}
+
+            def _merge_margin(df_like: Any) -> None:
+                if not isinstance(df_like, pd.DataFrame) or df_like.empty:
+                    return
+                for _, row in df_like.iterrows():
+                    td = self._to_trade_date_yyyymmdd(row.get("日期"))
+                    if not td:
+                        continue
+                    item = merged.setdefault(
+                        td, {"rzye": 0.0, "rqye": 0.0, "rzrqye": 0.0}
+                    )
+                    item["rzye"] += self._safe_float(row.get("融资余额")) or 0.0
+                    item["rqye"] += self._safe_float(row.get("融券余额")) or 0.0
+                    item["rzrqye"] += self._safe_float(row.get("融资融券余额")) or 0.0
+
+            _merge_margin(sh_df)
+            _merge_margin(sz_df)
+
+            for td in sorted(merged.keys())[-days:]:
+                v = merged[td]
+                margin.append(
+                    {
+                        "trade_date": td,
+                        "rzye": v["rzye"],
+                        "rqye": v["rqye"],
+                        "rzrqye": v["rzrqye"],
+                    }
+                )
+
+            result = {
+                "component_type": "market_liquidity",
+                "source": "akshare",
+                "data": {
+                    "north_flow": north_flow,
+                    "margin": margin,
+                },
+            }
+            await self.cache.set(cache_key, result, ttl=1800)
+            return result
+        except Exception as e:
+            self.logger.warning(f"Akshare get_market_liquidity failed: {e}")
+            raise ValueError(f"Failed to get market liquidity: {e}")
 
     async def _get_all_stocks_cached(self) -> List[Dict]:
         """Helper to get all stocks with caching."""
