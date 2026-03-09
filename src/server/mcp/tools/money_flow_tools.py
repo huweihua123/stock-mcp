@@ -34,6 +34,37 @@ def register_money_flow_tools(mcp: FastMCP):
         resolved = await Container.market_gateway().resolve_ticker(raw_symbol)
         return to_ts_code(resolved)
 
+    def _unit_label(unit: str) -> str:
+        return {
+            "cny": "元",
+            "10k_cny": "万元",
+            "100m_cny": "亿元",
+            "unknown": "原始单位",
+        }.get(unit, unit or "原始单位")
+
+    def _to_cny(val: Any, unit: str) -> float | None:
+        if not isinstance(val, (int, float)):
+            return None
+        if unit == "cny":
+            return float(val)
+        if unit == "10k_cny":
+            return float(val) * 1e4
+        if unit == "100m_cny":
+            return float(val) * 1e8
+        return None
+
+    def _fmt_amount(val: Any, unit: str = "unknown") -> str:
+        cny = _to_cny(val, unit)
+        if cny is not None:
+            if abs(cny) >= 1e8:
+                return f"{cny / 1e8:.2f}亿"
+            if abs(cny) >= 1e4:
+                return f"{cny / 1e4:.2f}万"
+            return f"{cny:.0f}元"
+        if isinstance(val, (int, float)):
+            return f"{float(val):.2f}{_unit_label(unit)}"
+        return "N/A"
+
     @mcp.tool(tags={"money-flow"})
     async def get_money_flow(
         symbol: str, days: int = 20, ctx: Context = None
@@ -69,19 +100,17 @@ def register_money_flow_tools(mcp: FastMCP):
             total_retail = summary.get("total_retail_net", 0)
             total_net = total_main + total_retail
             trend = summary.get("trend", "未知")
-
-            # 格式化金额显示
-            def _fmt_amount(val: float) -> str:
-                if abs(val) >= 1e8:
-                    return f"{val/1e8:.2f}亿"
-                if abs(val) >= 1e4:
-                    return f"{val/1e4:.2f}万"
-                return f"{val:.0f}元"
+            amount_unit = (
+                result.get("amount_unit")
+                or summary.get("amount_unit")
+                or "unknown"
+            )
 
             summary_text = (
                 f"{symbol}主力资金流（{days}日）:\n"
-                f"- 大/超大单净流入(主力口径): {_fmt_amount(total_main)}\n"
-                f"- 整体净流{'入' if total_net >= 0 else '出'}: {_fmt_amount(total_net)}\n"
+                f"- 大/超大单净流入(主力口径): {_fmt_amount(total_main, amount_unit)}\n"
+                f"- 整体净流{'入' if total_net >= 0 else '出'}: {_fmt_amount(total_net, amount_unit)}\n"
+                f"- 金额单位口径: {_unit_label(amount_unit)}\n"
                 f"- 趋势: {trend}"
             )
 
@@ -104,7 +133,11 @@ def register_money_flow_tools(mcp: FastMCP):
                         trade_date = d.replace("-", "") if isinstance(d, str) else d
                         records.append({"trade_date": trade_date, "main_net_inflow": v})
 
-            content = {"ts_code": ts_code, "records": records}
+            content = {
+                "ts_code": ts_code,
+                "records": records,
+                "amount_unit": amount_unit,
+            }
 
             # 包装为 ArtifactEnvelope (竞品格式)
             artifact = create_artifact_envelope(
@@ -116,7 +149,12 @@ def register_money_flow_tools(mcp: FastMCP):
                     "Visualizes daily net inflow/outflow trends of Large & Extra-Large orders. "
                     f"Overall Trend: {trend}."
                 ),
-                metadata={"type": "money_flow", "ts_code": ts_code, "days": days},
+                metadata={
+                    "type": "money_flow",
+                    "ts_code": ts_code,
+                    "days": days,
+                    "amount_unit": amount_unit,
+                },
                 visible_to_llm=False,
                 display_in_report=True,
             )
@@ -1390,6 +1428,11 @@ def register_money_flow_tools(mcp: FastMCP):
             records = result.get("records", [])
             summary_info = result.get("summary", {})
             has_flow = result.get("has_money_flow", False)
+            amount_unit = (
+                result.get("amount_unit")
+                or summary_info.get("amount_unit")
+                or "unknown"
+            )
 
             # Build summary text
             total_pct = summary_info.get("total_pct_chg", 0)
@@ -1402,15 +1445,10 @@ def register_money_flow_tools(mcp: FastMCP):
                 f"- 区间涨跌幅: {total_pct:.2f}%",
             ]
             if has_flow and total_main is not None:
-
-                def _fmt(val):
-                    if abs(val) >= 1e8:
-                        return f"{val / 1e8:.2f}亿"
-                    if abs(val) >= 1e4:
-                        return f"{val / 1e4:.2f}万"
-                    return f"{val:.0f}元"
-
-                lines.append(f"- 主力累计净流入: {_fmt(total_main)}")
+                lines.append(
+                    f"- 主力累计净流入: {_fmt_amount(total_main, amount_unit)}"
+                )
+                lines.append(f"- 金额单位口径: {_unit_label(amount_unit)}")
                 if flow_source:
                     lines.append(f"- 资金流口径: {flow_source}")
             lines.append(f"- 趋势: {trend}")
@@ -1425,6 +1463,7 @@ def register_money_flow_tools(mcp: FastMCP):
                     "index_code": index_code,
                     "has_money_flow": has_flow,
                     "records": records,
+                    "amount_unit": amount_unit,
                 },
                 description=summary_text,
                 metadata={
@@ -1432,6 +1471,7 @@ def register_money_flow_tools(mcp: FastMCP):
                     "sector_name": index_name,
                     "index_code": index_code,
                     "days": len(records),
+                    "amount_unit": amount_unit,
                 },
                 visible_to_llm=False,
                 display_in_report=True,

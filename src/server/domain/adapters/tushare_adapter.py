@@ -400,7 +400,9 @@ class TushareAdapter(BaseDataAdapter):
         Returns:
             Dictionary containing dividend history rows
         """
-        cache_key = f"tushare:dividend:{ticker}:v1"
+        # Keep only the most recent dividend records to control payload size.
+        max_rows = 10
+        cache_key = f"tushare:dividend:{ticker}:v2:l{max_rows}"
         cached = await self.cache.get(cache_key)
         if cached:
             return cached
@@ -425,6 +427,14 @@ class TushareAdapter(BaseDataAdapter):
             if df is None or df.empty:
                 result = {"ts_code": ts_code, "rows": []}
             else:
+                if "end_date" in df.columns:
+                    sort_key = pd.to_datetime(df["end_date"], errors="coerce")
+                    df = (
+                        df.assign(_end_date_sort_key=sort_key)
+                        .sort_values("_end_date_sort_key", ascending=False)
+                        .drop(columns=["_end_date_sort_key"])
+                    )
+                df = df.head(max_rows)
                 df = df.where(df.notnull(), None)
                 result = {"ts_code": ts_code, "rows": df.to_dict("records")}
 
@@ -579,6 +589,7 @@ class TushareAdapter(BaseDataAdapter):
                     "ticker": ticker,
                     "component_type": "money_flow",
                     "source": "tushare",
+                    "amount_unit": "10k_cny",
                     "records": [],
                     "data": {
                         "dates": [],
@@ -591,6 +602,7 @@ class TushareAdapter(BaseDataAdapter):
                         "total_retail_net": 0,
                         "trend": "暂无数据（接口积分不足或该时段无数据）",
                         "period_days": 0,
+                        "amount_unit": "10k_cny",
                     },
                 }
                 await self.cache.set(cache_key, result, ttl=300)
@@ -637,6 +649,7 @@ class TushareAdapter(BaseDataAdapter):
                 "ticker": ticker,
                 "component_type": "money_flow",
                 "source": "tushare",
+                "amount_unit": "10k_cny",
                 "data": {
                     "dates": dates,
                     "main_net_inflow": [round(x, 2) for x in main_net],
@@ -648,6 +661,7 @@ class TushareAdapter(BaseDataAdapter):
                     "total_retail_net": round(total_retail, 2),
                     "trend": trend,
                     "period_days": len(dates),
+                    "amount_unit": "10k_cny",
                 },
             }
 
@@ -1977,6 +1991,15 @@ class TushareAdapter(BaseDataAdapter):
             has_flow = any("main_net_inflow" in r for r in records)
             total_main = sum(r.get("main_net_inflow", 0) for r in records)
             total_pct_chg = sum(r.get("pct_chg", 0) or 0 for r in records)
+            amount_unit = "unknown"
+            if has_flow:
+                if flow_source == "moneyflow_ind_dc":
+                    # Eastmoney 行业资金流向 net_amount 的原始单位与 Tushare 口径不同，
+                    # 先标记为未知，避免错误地当作“元”格式化。
+                    amount_unit = "unknown"
+                else:
+                    # moneyflow_ind / moneyflow_ind_ths 的金额字段口径按万元处理。
+                    amount_unit = "10k_cny"
 
             if has_flow:
                 if total_main > 0:
@@ -1993,12 +2016,14 @@ class TushareAdapter(BaseDataAdapter):
                 "index_code": index_code,
                 "days": len(records),
                 "has_money_flow": has_flow,
+                "amount_unit": amount_unit,
                 "records": records,
                 "summary": {
                     "total_pct_chg": round(total_pct_chg, 2),
                     "total_main_net": (round(total_main, 2) if has_flow else None),
                     "trend": trend,
                     "flow_source": flow_source,
+                    "amount_unit": amount_unit,
                 },
             }
 
