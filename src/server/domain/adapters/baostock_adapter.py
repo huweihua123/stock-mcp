@@ -12,7 +12,7 @@ All methods are async via asyncio.run_in_executor to avoid blocking.
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
@@ -557,3 +557,321 @@ class BaostockAdapter(BaseDataAdapter):
         
         # Return first row as dict
         return df.iloc[0].to_dict()
+
+    @staticmethod
+    def _safe_float(value: Any) -> Optional[float]:
+        """Best-effort numeric parser for Baostock raw string values."""
+        if value is None:
+            return None
+        text = str(value).strip()
+        if text == "":
+            return None
+        # Handle values like "23.3199或25.911" by taking the first numeric token.
+        text = text.replace(",", "")
+        for sep in ("或", "/", "|", "~"):
+            if sep in text:
+                text = text.split(sep, 1)[0].strip()
+                break
+        try:
+            return float(text)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _fmt_ymd(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
+    def _to_ts_code(self, ticker: str) -> str:
+        """Convert internal ticker to ts_code style for tool-layer compatibility."""
+        if ":" not in ticker:
+            return ticker
+        exchange, symbol = ticker.split(":", 1)
+        if exchange == "SSE":
+            return f"{symbol}.SH"
+        if exchange == "SZSE":
+            return f"{symbol}.SZ"
+        return symbol
+
+    async def get_dividend_info(self, ticker: str) -> Dict[str, Any]:
+        """Fetch dividend history and normalize to Tushare-like schema."""
+        max_rows = 10
+        lookback_years = 10
+        cache_key = f"baostock:dividend:{ticker}:l{max_rows}:y{lookback_years}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        bs_code = self._to_bs_code(ticker)
+        ts_code = self._to_ts_code(ticker)
+
+        rows: List[Dict[str, Any]] = []
+        current_year = datetime.now().year
+
+        try:
+            for year in range(current_year, current_year - lookback_years, -1):
+                rs = await self._run(
+                    bs.query_dividend_data,
+                    code=bs_code,
+                    year=str(year),
+                    yearType="report",
+                )
+                if rs.error_code != "0":
+                    self.logger.warning(
+                        f"Baostock query_dividend_data failed for {bs_code} {year}: "
+                        f"{rs.error_msg}"
+                    )
+                    continue
+
+                while rs.next():
+                    row = dict(zip(rs.fields, rs.get_row_data()))
+
+                    plan_announce = self._fmt_ymd(row.get("dividPlanAnnounceDate"))
+                    plan_date = self._fmt_ymd(row.get("dividPlanDate"))
+                    regist_date = self._fmt_ymd(row.get("dividRegistDate"))
+                    operate_date = self._fmt_ymd(row.get("dividOperateDate"))
+                    pay_date = self._fmt_ymd(row.get("dividPayDate"))
+                    stock_market_date = self._fmt_ymd(row.get("dividStockMarketDate"))
+
+                    if pay_date or operate_date:
+                        div_proc = "实施"
+                    elif plan_date or plan_announce:
+                        div_proc = "预案"
+                    else:
+                        div_proc = ""
+
+                    rows.append(
+                        {
+                            "ts_code": ts_code,
+                            "end_date": plan_date or plan_announce,
+                            "ann_date": plan_announce,
+                            "div_proc": div_proc,
+                            "stk_div": self._safe_float(row.get("dividStocksPs")),
+                            "stk_bo_rate": None,
+                            "stk_co_rate": self._safe_float(
+                                row.get("dividReserveToStockPs")
+                            ),
+                            "cash_div": self._safe_float(
+                                row.get("dividCashPsAfterTax")
+                            ),
+                            "cash_div_tax": self._safe_float(
+                                row.get("dividCashPsBeforeTax")
+                            ),
+                            "record_date": regist_date,
+                            "ex_date": operate_date,
+                            "pay_date": pay_date,
+                            "div_listdate": stock_market_date,
+                            "imp_ann_date": plan_date,
+                            "base_share": None,
+                        }
+                    )
+
+            rows.sort(
+                key=lambda r: (
+                    str(r.get("end_date") or ""),
+                    str(r.get("ann_date") or ""),
+                ),
+                reverse=True,
+            )
+
+            dedup_rows: List[Dict[str, Any]] = []
+            seen = set()
+            for row in rows:
+                key = (
+                    row.get("ts_code"),
+                    row.get("end_date"),
+                    row.get("ann_date"),
+                    row.get("cash_div_tax"),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                dedup_rows.append(row)
+                if len(dedup_rows) >= max_rows:
+                    break
+
+            result = {
+                "component_type": "dividend_info",
+                "source": "baostock",
+                "ts_code": ts_code,
+                "rows": dedup_rows,
+            }
+
+            await self.cache.set(cache_key, result, ttl=86400)
+            return result
+        except Exception as e:
+            self.logger.error(f"Failed to fetch dividend info for {ticker}: {e}")
+            raise ValueError(f"Failed to fetch dividend info for {ticker}: {e}")
+
+    async def get_forecast_info(self, ticker: str, limit: int = 50) -> Dict[str, Any]:
+        """Fetch performance forecast and normalize to Tushare-like schema."""
+        if limit <= 0:
+            limit = 50
+
+        cache_key = f"baostock:forecast:{ticker}:l{limit}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        bs_code = self._to_bs_code(ticker)
+        ts_code = self._to_ts_code(ticker)
+        end_date = datetime.now().strftime("%Y-%m-%d")
+        start_date = (datetime.now() - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
+
+        try:
+            rs = await self._run(
+                bs.query_forecast_report,
+                code=bs_code,
+                start_date=start_date,
+                end_date=end_date,
+            )
+
+            if rs.error_code != "0":
+                raise ValueError(
+                    f"Baostock query_forecast_report failed: {rs.error_msg}"
+                )
+
+            rows: List[Dict[str, Any]] = []
+            while rs.next():
+                row = dict(zip(rs.fields, rs.get_row_data()))
+                rows.append(
+                    {
+                        "ts_code": ts_code,
+                        "ann_date": self._fmt_ymd(row.get("profitForcastExpPubDate")),
+                        "end_date": self._fmt_ymd(row.get("profitForcastExpStatDate")),
+                        "type": row.get("profitForcastType") or None,
+                        "p_change_min": self._safe_float(
+                            row.get("profitForcastChgPctDwn")
+                        ),
+                        "p_change_max": self._safe_float(
+                            row.get("profitForcastChgPctUp")
+                        ),
+                        "net_profit_min": None,
+                        "net_profit_max": None,
+                        "last_parent_net": None,
+                        "first_ann_date": None,
+                        "summary": row.get("profitForcastAbstract") or None,
+                        "change_reason": None,
+                        "update_flag": None,
+                    }
+                )
+
+            rows.sort(
+                key=lambda r: (
+                    str(r.get("ann_date") or ""),
+                    str(r.get("end_date") or ""),
+                ),
+                reverse=True,
+            )
+
+            dedup_rows: List[Dict[str, Any]] = []
+            seen = set()
+            for row in rows:
+                key = (
+                    row.get("ts_code"),
+                    row.get("ann_date"),
+                    row.get("end_date"),
+                    row.get("summary"),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                dedup_rows.append(row)
+                if len(dedup_rows) >= limit:
+                    break
+
+            result = {
+                "component_type": "forecast_info",
+                "source": "baostock",
+                "ts_code": ts_code,
+                "rows": dedup_rows,
+            }
+            await self.cache.set(cache_key, result, ttl=43200)
+            return result
+        except Exception as e:
+            self.logger.error(f"Failed to fetch forecast info for {ticker}: {e}")
+            raise ValueError(f"Failed to fetch forecast info for {ticker}: {e}")
+
+    async def get_money_supply(self, months: int = 60) -> Dict[str, Any]:
+        """Fetch monthly M0/M1/M2 data and normalize to money_supply schema."""
+        if months <= 0:
+            raise ValueError("months must be > 0")
+
+        end_dt = datetime.now()
+        end_m = end_dt.strftime("%Y-%m")
+        start_m = (end_dt - timedelta(days=months * 31)).strftime("%Y-%m")
+        cache_key = f"baostock:money_supply:{start_m}-{end_m}:m{months}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        try:
+            rs = await self._run(
+                bs.query_money_supply_data_month,
+                start_date=start_m,
+                end_date=end_m,
+            )
+
+            if rs.error_code != "0":
+                raise ValueError(
+                    f"Baostock query_money_supply_data_month failed: {rs.error_msg}"
+                )
+
+            data: List[Dict[str, Any]] = []
+            while rs.next():
+                row = dict(zip(rs.fields, rs.get_row_data()))
+                year = str(row.get("statYear") or "").zfill(4)
+                month = str(row.get("statMonth") or "").zfill(2)
+                month_key = f"{year}-{month}" if year.strip("0") else None
+
+                m1_yoy = self._safe_float(row.get("m1YOY"))
+                m2_yoy = self._safe_float(row.get("m2YOY"))
+
+                data.append(
+                    {
+                        "month": month_key,
+                        "stat_year": year or None,
+                        "stat_month": month or None,
+                        "m0": self._safe_float(row.get("m0Month")),
+                        "m0_yoy": self._safe_float(row.get("m0YOY")),
+                        "m0_mom": self._safe_float(row.get("m0ChainRelative")),
+                        "m1": self._safe_float(row.get("m1Month")),
+                        "m1_yoy": m1_yoy,
+                        "m1_mom": self._safe_float(row.get("m1ChainRelative")),
+                        "m2": self._safe_float(row.get("m2Month")),
+                        "m2_yoy": m2_yoy,
+                        "m2_mom": self._safe_float(row.get("m2ChainRelative")),
+                        "m1_m2_spread": (
+                            (m1_yoy - m2_yoy)
+                            if m1_yoy is not None and m2_yoy is not None
+                            else None
+                        ),
+                    }
+                )
+
+            data = [row for row in data if row.get("month")]
+            data.sort(key=lambda x: str(x.get("month")))
+            if months > 0:
+                data = data[-months:]
+
+            latest = data[-1] if data else {}
+            result = {
+                "component_type": "money_supply",
+                "source": "baostock",
+                "data": data,
+                "summary": {
+                    "latest_month": latest.get("month"),
+                    "latest_m1_yoy": latest.get("m1_yoy"),
+                    "latest_m2_yoy": latest.get("m2_yoy"),
+                    "latest_spread": latest.get("m1_m2_spread"),
+                    "period_months": len(data),
+                },
+            }
+
+            await self.cache.set(cache_key, result, ttl=3600)
+            return result
+        except Exception as e:
+            self.logger.error(f"Failed to fetch money supply: {e}")
+            raise ValueError(f"Failed to fetch money supply: {e}")
