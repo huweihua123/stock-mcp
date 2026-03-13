@@ -491,27 +491,89 @@ class AdapterManager:
         )
 
     async def get_sector_trend(
-        self, sector_name: str, days: int = 10
+        self,
+        sector_name: str = "",
+        days: int = 10,
+        sector_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         return await self._dispatch_market(
-            "get_sector_trend", sector_name=sector_name, days=days
+            "get_sector_trend",
+            sector_name=sector_name,
+            days=days,
+            sector_id=sector_id,
         )
 
+    async def resolve_sector(
+        self, query_text: str, intent: str = "trend"
+    ) -> Dict[str, Any]:
+        """Resolve sector with cross-adapter fallback.
+
+        Prefer first adapter that returns:
+        - resolved
+        - ambiguous
+        If an adapter returns not_found, continue trying the next adapter.
+        """
+        last_not_found: Optional[Dict[str, Any]] = None
+        last_error: Optional[Exception] = None
+        for adapter in self._adapter_order:
+            try:
+                result = await asyncio.wait_for(
+                    adapter.resolve_sector(query_text=query_text, intent=intent),
+                    timeout=self._provider_timeout_seconds,
+                )
+                if not isinstance(result, dict):
+                    continue
+                status = str(result.get("status", "")).lower()
+                if status in {"resolved", "ambiguous"}:
+                    return result
+                if status == "not_found":
+                    last_not_found = result
+                    continue
+                return result
+            except NotImplementedError:
+                continue
+            except asyncio.TimeoutError:
+                last_error = TimeoutError(
+                    f"timeout after {self._provider_timeout_seconds}s"
+                )
+                logger.warning(
+                    f"{adapter.source.value}.resolve_sector() timeout in "
+                    f"{self._provider_timeout_seconds}s"
+                )
+            except Exception as e:
+                last_error = e
+                logger.warning(f"{adapter.source.value}.resolve_sector() failed: {e}")
+
+        if last_not_found is not None:
+            return last_not_found
+        raise ValueError(f"No adapter supports resolve_sector: {last_error}")
+
     async def get_sector_money_flow_history(
-        self, sector_name: str, days: int = 20
+        self,
+        sector_name: str = "",
+        days: int = 20,
+        sector_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         return await self._dispatch_market(
-            "get_sector_money_flow_history", sector_name=sector_name, days=days
+            "get_sector_money_flow_history",
+            sector_name=sector_name,
+            days=days,
+            sector_id=sector_id,
         )
 
     async def get_sector_valuation_metrics(
-        self, sector_name: str, days: int = 250, sample_size: int = 60
+        self,
+        sector_name: str = "",
+        days: int = 250,
+        sample_size: int = 60,
+        sector_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         return await self._dispatch_market(
             "get_sector_valuation_metrics",
             sector_name=sector_name,
             days=days,
             sample_size=sample_size,
+            sector_id=sector_id,
         )
 
     async def get_ggt_daily(self, days: int = 60) -> Dict[str, Any]:

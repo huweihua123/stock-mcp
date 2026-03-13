@@ -272,6 +272,7 @@ def get_tools_by_tag(tag: str) -> list[str]:
             "get_interest_rates",
             "get_market_liquidity",
             "get_market_money_flow",
+            "resolve_sector",
             "get_sector_trend",
             "get_sector_money_flow_history",
             "get_sector_valuation_metrics",
@@ -295,6 +296,14 @@ def get_tools_by_tag(tag: str) -> list[str]:
             "get_us_economic_growth",
             "get_us_inflation_employment",
             "get_us_interest_rates",
+        ],
+        "sector-research": [
+            "resolve_sector_scope",
+            "build_sector_universe",
+            "build_peer_benchmark_table",
+            "build_sector_evidence_pack",
+            "build_sector_structure_snapshot",
+            "quality_gate_sector_report",
         ],
     }
 
@@ -329,6 +338,7 @@ def get_all_tags() -> set[str]:
         "money-flow",
         "chunking",
         "us-macro",
+        "sector-research",
         "core",
         "extended",
     }

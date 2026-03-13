@@ -58,6 +58,7 @@ _MARKET_METHODS: Set[str] = {
     "get_interest_rates",
     "get_market_liquidity",
     "get_market_money_flow",
+    "resolve_sector",
     "get_sector_trend",
     "get_sector_money_flow_history",
     "get_sector_valuation_metrics",

@@ -110,31 +110,61 @@ async def get_market_money_flow(
     )
 
 
-async def get_sector_trend(sector_name: str, days: int = 10) -> Dict[str, Any]:
+async def get_sector_trend(
+    sector_name: str = "",
+    days: int = 10,
+    sector_id: Optional[str] = None,
+) -> Dict[str, Any]:
     manager = Container.market_gateway()
-    logger.info("UseCase: get_sector_trend", sector=sector_name, days=days)
-    return await manager.get_sector_trend(sector_name, days)
+    logger.info(
+        "UseCase: get_sector_trend",
+        sector=sector_name,
+        sector_id=sector_id,
+        days=days,
+    )
+    return await manager.get_sector_trend(
+        sector_name=sector_name,
+        days=days,
+        sector_id=sector_id,
+    )
+
+
+async def resolve_sector(query_text: str, intent: str = "trend") -> Dict[str, Any]:
+    manager = Container.market_gateway()
+    logger.info("UseCase: resolve_sector", query=query_text, intent=intent)
+    return await manager.resolve_sector(query_text=query_text, intent=intent)
 
 
 async def get_sector_money_flow_history(
-    sector_name: str, days: int = 20
+    sector_name: str = "",
+    days: int = 20,
+    sector_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     manager = Container.market_gateway()
     logger.info(
         "UseCase: get_sector_money_flow_history",
         sector=sector_name,
+        sector_id=sector_id,
         days=days,
     )
-    return await manager.get_sector_money_flow_history(sector_name, days)
+    return await manager.get_sector_money_flow_history(
+        sector_name=sector_name,
+        days=days,
+        sector_id=sector_id,
+    )
 
 
 async def get_sector_valuation_metrics(
-    sector_name: str, days: int = 250, sample_size: int = 60
+    sector_name: str = "",
+    days: int = 250,
+    sample_size: int = 60,
+    sector_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     manager = Container.market_gateway()
     logger.info(
         "UseCase: get_sector_valuation_metrics",
         sector=sector_name,
+        sector_id=sector_id,
         days=days,
         sample_size=sample_size,
     )
@@ -142,6 +172,7 @@ async def get_sector_valuation_metrics(
         sector_name=sector_name,
         days=days,
         sample_size=sample_size,
+        sector_id=sector_id,
     )
 
 

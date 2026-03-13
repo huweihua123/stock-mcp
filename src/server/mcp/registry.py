@@ -24,6 +24,7 @@ from src.server.mcp.tools.us_fundamental_tools import register_us_fundamental_to
 from src.server.mcp.tools.us_technical_tools import register_us_technical_tools
 from src.server.mcp.tools.us_sector_tools import register_us_sector_tools
 from src.server.mcp.tools.us_macro_tools import register_us_macro_tools
+from src.server.mcp.tools.sector_research_tools import register_sector_research_tools
 
 
 @dataclass(frozen=True)
@@ -67,9 +68,9 @@ TOOL_GROUPS: List[ToolGroup] = [
     ToolGroup(
         name="filings",
         register=register_filings_tools,
-        enabled=False,
+        enabled=True,
         description="公告文件",
-        count=4,
+        count=8,
     ),
     ToolGroup(
         name="trade",
@@ -81,7 +82,7 @@ TOOL_GROUPS: List[ToolGroup] = [
     ToolGroup(
         name="chunking",
         register=register_chunking_tools,
-        enabled=False,
+        enabled=True,
         description="文档切片",
         count=1,
     ),
@@ -120,6 +121,13 @@ TOOL_GROUPS: List[ToolGroup] = [
         enabled=True,
         description="美股宏观分析 (GDP/通胀就业/利率)",
         count=3,
+    ),
+    ToolGroup(
+        name="sector-research",
+        register=register_sector_research_tools,
+        enabled=True,
+        description="行业研究编排（scope/universe/peer/evidence）",
+        count=7,
     ),
 ]
 

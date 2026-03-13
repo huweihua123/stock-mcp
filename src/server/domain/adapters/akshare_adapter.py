@@ -194,6 +194,92 @@ class AkshareAdapter(BaseDataAdapter):
 
         return None, None
 
+    async def _resolve_board_by_code(self, sector_id: str) -> Optional[Dict[str, str]]:
+        """Resolve board by code."""
+        sid = (sector_id or "").strip().upper()
+        if not sid:
+            return None
+        catalog = await self._get_board_catalog()
+        if not catalog:
+            return None
+        for item in catalog:
+            if str(item.get("code", "")).upper() == sid:
+                return item
+        return None
+
+    async def resolve_sector(
+        self, query_text: str, intent: str = "trend"
+    ) -> Dict[str, Any]:
+        """Resolve sector query into stable sector_id."""
+        query = (query_text or "").strip()
+        if not query:
+            return {
+                "component_type": "sector_resolve",
+                "source": "akshare",
+                "status": "not_found",
+                "query_text": query_text,
+                "intent": intent,
+                "reason": "empty query_text",
+            }
+
+        board = await self._resolve_board_by_code(query)
+        if board:
+            return {
+                "component_type": "sector_resolve",
+                "source": "akshare",
+                "status": "resolved",
+                "query_text": query_text,
+                "intent": intent,
+                "sector_id": board.get("code", ""),
+                "canonical_name": board.get("name", query),
+                "board_type": board.get("board_type", ""),
+            }
+
+        board, candidates = await self._resolve_board(query)
+        if board:
+            return {
+                "component_type": "sector_resolve",
+                "source": "akshare",
+                "status": "resolved",
+                "query_text": query_text,
+                "intent": intent,
+                "sector_id": board.get("code", ""),
+                "canonical_name": board.get("name", query),
+                "board_type": board.get("board_type", ""),
+            }
+
+        if candidates:
+            catalog = await self._get_board_catalog()
+            name_map = {str(x.get("name", "")): x for x in catalog}
+            candidate_rows = []
+            for name in candidates:
+                row = name_map.get(name, {})
+                candidate_rows.append(
+                    {
+                        "sector_id": row.get("code", ""),
+                        "canonical_name": name,
+                        "board_type": row.get("board_type", ""),
+                        "source": "akshare",
+                    }
+                )
+            return {
+                "component_type": "sector_resolve",
+                "source": "akshare",
+                "status": "ambiguous",
+                "query_text": query_text,
+                "intent": intent,
+                "candidates": candidate_rows,
+            }
+
+        return {
+            "component_type": "sector_resolve",
+            "source": "akshare",
+            "status": "not_found",
+            "query_text": query_text,
+            "intent": intent,
+            "reason": f"no sector matched for '{query}'",
+        }
+
     async def _fetch_board_hist(
         self, board: Dict[str, str], days: int
     ) -> pd.DataFrame:
@@ -590,25 +676,41 @@ class AkshareAdapter(BaseDataAdapter):
             raise ValueError(f"Failed to get market money flow: {e}")
 
     async def get_sector_trend(
-        self, sector_name: str, days: int = 10
+        self,
+        sector_name: str = "",
+        days: int = 10,
+        sector_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Get sector trend with fuzzy board resolution via AkShare."""
-        cache_key = f"akshare:sector_trend:{sector_name}:{days}"
+        cache_key = (
+            f"akshare:sector_trend:{(sector_id or '').strip().upper()}:"
+            f"{sector_name}:{days}"
+        )
         cached = await self.cache.get(cache_key)
         if cached:
             return cached
 
-        board, candidates = await self._resolve_board(sector_name)
+        query_name = (sector_name or "").strip()
+        query_sector_id = (sector_id or "").strip().upper()
+        candidates = None
+        if query_sector_id:
+            board = await self._resolve_board_by_code(query_sector_id)
+        else:
+            board, candidates = await self._resolve_board(query_name)
+
         if board is None:
             if candidates:
                 return {
-                    "error": f"板块名称 '{sector_name}' 不明确，请从以下候选中选择",
+                    "error": f"板块名称 '{query_name}' 不明确，请从以下候选中选择",
                     "candidates": candidates,
-                    "sector_name": sector_name,
+                    "sector_name": query_name,
+                    "sector_id": query_sector_id,
                     "component_type": "sector_trend",
                     "source": "akshare",
                 }
-            raise ValueError(f"No sector index found for '{sector_name}'")
+            if query_sector_id:
+                raise ValueError(f"No sector index found for id '{query_sector_id}'")
+            raise ValueError(f"No sector index found for '{query_name}'")
 
         try:
             hist_df = await self._fetch_board_hist(board, days)
@@ -640,6 +742,7 @@ class AkshareAdapter(BaseDataAdapter):
                 "component_type": "sector_trend",
                 "source": "akshare",
                 "sector_name": board["name"],
+                "index_code": board.get("code", ""),
                 "days": len(trend),
                 "total_pct_chg": round(total_pct_chg, 4),
                 "trend": trend,
@@ -647,31 +750,55 @@ class AkshareAdapter(BaseDataAdapter):
             await self.cache.set(cache_key, result, ttl=1800)
             return result
         except Exception as e:
-            self.logger.warning(f"Akshare get_sector_trend failed for {sector_name}: {e}")
+            self.logger.warning(
+                f"Akshare get_sector_trend failed for {query_name or query_sector_id}: {e}"
+            )
             raise ValueError(f"Failed to get sector trend: {e}")
 
     async def get_sector_money_flow_history(
-        self, sector_name: str, days: int = 20
+        self,
+        sector_name: str = "",
+        days: int = 20,
+        sector_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Get sector price + capital flow history via AkShare."""
-        cache_key = f"akshare:sector_money_flow:{sector_name}:{days}"
+        cache_key = (
+            f"akshare:sector_money_flow:{(sector_id or '').strip().upper()}:"
+            f"{sector_name}:{days}"
+        )
         cached = await self.cache.get(cache_key)
         if cached:
             return cached
 
-        board, candidates = await self._resolve_board(sector_name)
+        query_name = (sector_name or "").strip()
+        query_sector_id = (sector_id or "").strip().upper()
+        candidates = None
+        if query_sector_id:
+            board = await self._resolve_board_by_code(query_sector_id)
+        else:
+            board, candidates = await self._resolve_board(query_name)
+
         if board is None:
             if candidates:
                 return {
-                    "error": f"板块名称 '{sector_name}' 不明确，请从以下候选中选择",
+                    "error": f"板块名称 '{query_name}' 不明确，请从以下候选中选择",
                     "candidates": candidates,
-                    "sector_name": sector_name,
+                    "sector_name": query_name,
+                    "sector_id": query_sector_id,
+                    "component_type": "sector_flow",
+                    "source": "akshare",
+                }
+            if query_sector_id:
+                return {
+                    "error": f"未找到板块ID: {query_sector_id}",
+                    "sector_name": query_name,
+                    "sector_id": query_sector_id,
                     "component_type": "sector_flow",
                     "source": "akshare",
                 }
             return {
-                "error": f"未找到板块: {sector_name}",
-                "sector_name": sector_name,
+                "error": f"未找到板块: {query_name}",
+                "sector_name": query_name,
                 "component_type": "sector_flow",
                 "source": "akshare",
             }
@@ -754,7 +881,8 @@ class AkshareAdapter(BaseDataAdapter):
             return result
         except Exception as e:
             self.logger.warning(
-                f"Akshare get_sector_money_flow_history failed for {sector_name}: {e}"
+                "Akshare get_sector_money_flow_history failed for "
+                f"{query_name or query_sector_id}: {e}"
             )
             raise ValueError(f"Failed to get sector money flow: {e}")
 

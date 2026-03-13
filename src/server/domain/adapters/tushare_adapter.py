@@ -1491,11 +1491,101 @@ class TushareAdapter(BaseDataAdapter):
 
         return None, None, None
 
+    async def _resolve_sector_by_code(
+        self, sector_id: str
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """通过板块 ts_code 解析名称."""
+        sid = (sector_id or "").strip().upper()
+        if not sid:
+            return None, None
+        all_sectors = await self._get_all_sectors()
+        if not all_sectors:
+            return None, None
+        for item in all_sectors:
+            if str(item.get("ts_code", "")).upper() == sid:
+                return str(item.get("ts_code")), str(item.get("name", ""))
+        return None, None
+
+    async def resolve_sector(
+        self, query_text: str, intent: str = "trend"
+    ) -> Dict[str, Any]:
+        """解析板块查询词，返回稳定板块ID."""
+        query = (query_text or "").strip()
+        if not query:
+            return {
+                "component_type": "sector_resolve",
+                "source": "tushare",
+                "status": "not_found",
+                "query_text": query_text,
+                "intent": intent,
+                "reason": "empty query_text",
+            }
+
+        # 支持直接传入 ts_code
+        by_code, by_code_name = await self._resolve_sector_by_code(query)
+        if by_code:
+            return {
+                "component_type": "sector_resolve",
+                "source": "tushare",
+                "status": "resolved",
+                "query_text": query_text,
+                "intent": intent,
+                "sector_id": by_code,
+                "canonical_name": by_code_name or query,
+            }
+
+        index_code, matched_name, candidates = await self._resolve_sector_index(query)
+        if index_code:
+            return {
+                "component_type": "sector_resolve",
+                "source": "tushare",
+                "status": "resolved",
+                "query_text": query_text,
+                "intent": intent,
+                "sector_id": index_code,
+                "canonical_name": matched_name or query,
+            }
+
+        if candidates:
+            all_sectors = await self._get_all_sectors()
+            code_map = {str(x.get("name", "")): str(x.get("ts_code", "")) for x in all_sectors}
+            candidate_rows = [
+                {
+                    "sector_id": code_map.get(name, ""),
+                    "canonical_name": name,
+                    "source": "tushare",
+                }
+                for name in candidates
+            ]
+            return {
+                "component_type": "sector_resolve",
+                "source": "tushare",
+                "status": "ambiguous",
+                "query_text": query_text,
+                "intent": intent,
+                "candidates": candidate_rows,
+            }
+
+        return {
+            "component_type": "sector_resolve",
+            "source": "tushare",
+            "status": "not_found",
+            "query_text": query_text,
+            "intent": intent,
+            "reason": f"no sector matched for '{query}'",
+        }
+
     async def get_sector_trend(
-        self, sector_name: str, days: int = 10
+        self,
+        sector_name: str = "",
+        days: int = 10,
+        sector_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """获取板块走势数据（支持模糊匹配板块名称）."""
-        cache_key = f"tushare:sector_trend:{sector_name}:{days}"
+        cache_key = (
+            f"tushare:sector_trend:{(sector_id or '').strip().upper()}:"
+            f"{sector_name}:{days}"
+        )
         cached = await self.cache.get(cache_key)
         if cached:
             return cached
@@ -1505,23 +1595,35 @@ class TushareAdapter(BaseDataAdapter):
             raise ValueError("Tushare client not available")
 
         try:
-            # 方案C：使用三级缓存 + 模糊匹配解析板块
-            index_code, matched_name, candidates = await self._resolve_sector_index(
-                sector_name
-            )
+            query_name = (sector_name or "").strip()
+            query_sector_id = (sector_id or "").strip().upper()
+            matched_name: Optional[str] = None
+            candidates: Optional[List[str]] = None
+
+            if query_sector_id:
+                index_code, code_name = await self._resolve_sector_by_code(query_sector_id)
+                matched_name = code_name or query_name or query_sector_id
+            else:
+                # 方案C：使用三级缓存 + 模糊匹配解析板块
+                index_code, matched_name, candidates = await self._resolve_sector_index(
+                    query_name
+                )
 
             if index_code is None:
                 if candidates:
                     return {
-                        "error": f"板块名称 '{sector_name}' 不明确，请从以下候选中选择",
+                        "error": f"板块名称 '{query_name}' 不明确，请从以下候选中选择",
                         "candidates": candidates,
-                        "sector_name": sector_name,
+                        "sector_name": query_name,
+                        "sector_id": query_sector_id,
                         "component_type": "sector_trend",
                         "source": "tushare",
                     }
-                raise ValueError(f"No sector index found for '{sector_name}'")
+                if query_sector_id:
+                    raise ValueError(f"No sector index found for id '{query_sector_id}'")
+                raise ValueError(f"No sector index found for '{query_name}'")
 
-            display_name = matched_name or sector_name
+            display_name = matched_name or query_name or query_sector_id
             end_date = datetime.now()
             start_date = end_date - timedelta(days=days + 10)
 
@@ -1551,6 +1653,7 @@ class TushareAdapter(BaseDataAdapter):
                 "component_type": "sector_trend",
                 "source": "tushare",
                 "sector_name": display_name,
+                "index_code": index_code,
                 "days": days,
                 "total_pct_chg": total_pct_chg,
                 "trend": trend,
@@ -1855,7 +1958,10 @@ class TushareAdapter(BaseDataAdapter):
             raise ValueError(f"Failed to get valuation metrics: {e}")
 
     async def get_sector_money_flow_history(
-        self, sector_name: str, days: int = 20
+        self,
+        sector_name: str = "",
+        days: int = 20,
+        sector_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """获取板块资金流向历史数据（支持模糊匹配板块名称）.
 
@@ -1870,7 +1976,10 @@ class TushareAdapter(BaseDataAdapter):
         Returns:
             包含板块资金流向历史数据的结构化字典
         """
-        cache_key = f"tushare:sector_money_flow:{sector_name}:{days}"
+        cache_key = (
+            f"tushare:sector_money_flow:{(sector_id or '').strip().upper()}:"
+            f"{sector_name}:{days}"
+        )
         cached = await self.cache.get(cache_key)
         if cached:
             return cached
@@ -1880,29 +1989,47 @@ class TushareAdapter(BaseDataAdapter):
             raise ValueError("Tushare client not available")
 
         try:
-            # Step 1: 方案C — 三级缓存 + 模糊匹配解析板块
-            index_code, index_name, candidates = await self._resolve_sector_index(
-                sector_name
-            )
+            query_name = (sector_name or "").strip()
+            query_sector_id = (sector_id or "").strip().upper()
+
+            if query_sector_id:
+                index_code, code_name = await self._resolve_sector_by_code(query_sector_id)
+                index_name = code_name or query_name or query_sector_id
+                candidates = None
+            else:
+                # Step 1: 方案C — 三级缓存 + 模糊匹配解析板块
+                index_code, index_name, candidates = await self._resolve_sector_index(
+                    query_name
+                )
 
             if index_code is None:
                 if candidates:
                     return {
                         "error": (
-                            f"板块名称 '{sector_name}' 不明确，" "请从以下候选中选择"
+                            f"板块名称 '{query_name}' 不明确，" "请从以下候选中选择"
                         ),
                         "candidates": candidates,
-                        "sector_name": sector_name,
+                        "sector_name": query_name,
+                        "sector_id": query_sector_id,
                         "component_type": "sector_flow",
                         "source": "tushare",
                     }
+                if query_sector_id:
+                    return {
+                        "error": f"未找到板块ID: {query_sector_id}",
+                        "sector_name": query_name,
+                        "sector_id": query_sector_id,
+                        "source": "tushare",
+                        "component_type": "sector_flow",
+                    }
                 return {
-                    "error": f"未找到板块: {sector_name}",
-                    "sector_name": sector_name,
+                    "error": f"未找到板块: {query_name}",
+                    "sector_name": query_name,
                     "source": "tushare",
+                    "component_type": "sector_flow",
                 }
 
-            index_name = index_name or sector_name
+            index_name = index_name or query_name or query_sector_id
 
             end_date = datetime.now()
             start_date = end_date - timedelta(days=int(days * 1.6))
@@ -1941,7 +2068,7 @@ class TushareAdapter(BaseDataAdapter):
                         break
                 except Exception as flow_err:
                     self.logger.debug(
-                        f"{api_name} unavailable for {sector_name}/{index_code}: "
+                        f"{api_name} unavailable for {query_name or query_sector_id}/{index_code}: "
                         f"{flow_err}"
                     )
 
@@ -2005,14 +2132,14 @@ class TushareAdapter(BaseDataAdapter):
                             if not hit.empty:
                                 row = hit.iloc[0]
                         if row is None and "name" in dc_df.columns:
-                            names = [index_name, sector_name]
+                            names = [index_name, query_name]
                             hit = dc_df[
                                 dc_df["name"].astype(str).isin([n for n in names if n])
                             ]
                             if hit.empty:
                                 hit = dc_df[
                                     dc_df["name"].astype(str).str.contains(
-                                        str(sector_name), na=False
+                                        str(query_name), na=False
                                     )
                                 ]
                             if not hit.empty:
@@ -2023,7 +2150,7 @@ class TushareAdapter(BaseDataAdapter):
                             dc_rows.append(item)
                     except Exception as dc_err:
                         self.logger.debug(
-                            f"moneyflow_ind_dc fallback failed for {sector_name} "
+                            f"moneyflow_ind_dc fallback failed for {query_name or query_sector_id} "
                             f"on {td}: {dc_err}"
                         )
                 if dc_rows:
@@ -2164,12 +2291,17 @@ class TushareAdapter(BaseDataAdapter):
 
         except Exception as e:
             self.logger.error(
-                f"Failed to get sector money flow for " f"{sector_name}: {e}"
+                f"Failed to get sector money flow for "
+                f"{query_name or query_sector_id}: {e}"
             )
             raise ValueError(f"Failed to get sector money flow: {e}")
 
     async def get_sector_valuation_metrics(
-        self, sector_name: str, days: int = 250, sample_size: int = 60
+        self,
+        sector_name: str = "",
+        days: int = 250,
+        sample_size: int = 60,
+        sector_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """获取板块估值指标(PE/PB)及历史分位.
 
@@ -2181,7 +2313,8 @@ class TushareAdapter(BaseDataAdapter):
         safe_days = max(30, min(int(days), 750))
         safe_sample = max(10, min(int(sample_size), 200))
         cache_key = (
-            f"tushare:sector_valuation:{sector_name}:{safe_days}:{safe_sample}"
+            f"tushare:sector_valuation:{(sector_id or '').strip().upper()}:"
+            f"{sector_name}:{safe_days}:{safe_sample}"
         )
         cached = await self.cache.get(cache_key)
         if cached:
@@ -2192,27 +2325,44 @@ class TushareAdapter(BaseDataAdapter):
             raise ValueError("Tushare client not available")
 
         try:
-            index_code, index_name, candidates = await self._resolve_sector_index(
-                sector_name
-            )
+            query_name = (sector_name or "").strip()
+            query_sector_id = (sector_id or "").strip().upper()
+
+            if query_sector_id:
+                index_code, code_name = await self._resolve_sector_by_code(query_sector_id)
+                index_name = code_name or query_name or query_sector_id
+                candidates = None
+            else:
+                index_code, index_name, candidates = await self._resolve_sector_index(
+                    query_name
+                )
 
             if index_code is None:
                 if candidates:
                     return {
-                        "error": f"板块名称 '{sector_name}' 不明确，请从候选中选择",
+                        "error": f"板块名称 '{query_name}' 不明确，请从候选中选择",
                         "candidates": candidates,
-                        "sector_name": sector_name,
+                        "sector_name": query_name,
+                        "sector_id": query_sector_id,
+                        "component_type": "sector_valuation_metrics",
+                        "source": "tushare",
+                    }
+                if query_sector_id:
+                    return {
+                        "error": f"未找到板块ID: {query_sector_id}",
+                        "sector_name": query_name,
+                        "sector_id": query_sector_id,
                         "component_type": "sector_valuation_metrics",
                         "source": "tushare",
                     }
                 return {
-                    "error": f"未找到板块: {sector_name}",
-                    "sector_name": sector_name,
+                    "error": f"未找到板块: {query_name}",
+                    "sector_name": query_name,
                     "component_type": "sector_valuation_metrics",
                     "source": "tushare",
                 }
 
-            display_name = index_name or sector_name
+            display_name = index_name or query_name or query_sector_id
 
             member_df = await self._run(client.ths_member, ts_code=index_code)
             if member_df is None or member_df.empty:
@@ -2445,7 +2595,8 @@ class TushareAdapter(BaseDataAdapter):
 
         except Exception as e:
             self.logger.error(
-                f"Failed to get sector valuation metrics for {sector_name}: {e}"
+                f"Failed to get sector valuation metrics for "
+                f"{query_name or query_sector_id}: {e}"
             )
             raise ValueError(f"Failed to get sector valuation metrics: {e}")
 

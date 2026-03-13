@@ -4,6 +4,7 @@ Provides access to regulatory filings and announcements.
 Returns structured data (JSON).
 """
 
+import re
 from typing import Any, Dict, List, Optional
 
 from fastmcp import FastMCP, Context
@@ -17,6 +18,102 @@ from src.server.mcp.tools.artifact_utils import (
     create_symbol_error_response,
 )
 from src.server.domain.symbols.errors import SymbolResolutionError
+
+
+_NUMBER_PATTERN = re.compile(r"\b\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:%|x|倍|亿美元|亿元|万元)?\b")
+
+
+def _safe_excerpt(text: str, limit: int = 240) -> str:
+    val = (text or "").strip()
+    return val if len(val) <= limit else (val[: limit - 3] + "...")
+
+
+def _extract_metric_lines(
+    markdown: str,
+    metric_hints: List[str],
+    max_items: int = 30,
+) -> List[Dict[str, Any]]:
+    lines = (markdown or "").splitlines()
+    hints = [h.lower() for h in (metric_hints or []) if str(h).strip()]
+    items: List[Dict[str, Any]] = []
+    for idx, line in enumerate(lines, start=1):
+        raw = line.strip()
+        if not raw:
+            continue
+        lowered = raw.lower()
+        matched_hints = [h for h in hints if h in lowered]
+        numbers = _NUMBER_PATTERN.findall(raw)
+        if not numbers:
+            continue
+        if hints and not matched_hints:
+            continue
+        items.append(
+            {
+                "line_no": idx,
+                "text": _safe_excerpt(raw),
+                "numbers": numbers[:8],
+                "metric_hints": matched_hints[:5],
+            }
+        )
+        if len(items) >= max_items:
+            break
+    return items
+
+
+def _extract_section_facts(
+    markdown: str,
+    section_hints: List[str],
+    max_quotes_per_section: int = 5,
+) -> List[Dict[str, Any]]:
+    lines = (markdown or "").splitlines()
+    hints = [h.lower() for h in (section_hints or []) if str(h).strip()]
+    sections: List[Dict[str, Any]] = []
+
+    current_heading = ""
+    current_lines: List[str] = []
+    collected: Dict[str, List[Dict[str, Any]]] = {}
+
+    def _flush():
+        nonlocal current_heading, current_lines
+        if not current_heading or not current_lines:
+            current_heading = ""
+            current_lines = []
+            return
+        heading_key = current_heading.lower()
+        matched = [h for h in hints if h in heading_key] if hints else [current_heading]
+        if matched:
+            snippets = []
+            for i, text in enumerate(current_lines):
+                clean = text.strip()
+                if not clean:
+                    continue
+                snippets.append({"text": _safe_excerpt(clean, 300)})
+                if len(snippets) >= max_quotes_per_section:
+                    break
+            if snippets:
+                bucket = collected.setdefault(current_heading, [])
+                bucket.extend(snippets)
+        current_heading = ""
+        current_lines = []
+
+    for raw in lines:
+        stripped = raw.strip()
+        if stripped.startswith("#"):
+            _flush()
+            current_heading = stripped.lstrip("#").strip()
+            continue
+        if current_heading:
+            current_lines.append(stripped)
+    _flush()
+
+    for heading, snippets in collected.items():
+        sections.append(
+            {
+                "heading": heading,
+                "facts": snippets[:max_quotes_per_section],
+            }
+        )
+    return sections
 
 
 def register_filings_tools(mcp: FastMCP):
@@ -465,4 +562,285 @@ def register_filings_tools(mcp: FastMCP):
                     f"❌ 文档处理失败: {doc_id}",
                     extra={"error": str(e)}
                 )
+            return {"error": str(e)}
+
+    @mcp.tool(tags={"filings"})
+    async def get_filing_markdown(
+        ticker: str,
+        doc_id: str,
+        ctx: Context = None,
+    ) -> Dict[str, Any]:
+        """Get SEC filing markdown content by ticker + accession number."""
+        if ctx:
+            await ctx.info(
+                f"🔧 获取SEC文档Markdown: {ticker} {doc_id}",
+                extra={"ticker": ticker, "doc_id": doc_id},
+            )
+
+        try:
+            logger.info(
+                "MCP tool called: get_filing_markdown",
+                ticker=ticker,
+                doc_id=doc_id,
+            )
+            result = await filings_use_cases.get_filing_markdown(
+                ticker=ticker,
+                doc_id=doc_id,
+            )
+
+            markdown = ""
+            if isinstance(result, dict):
+                markdown = str(result.get("content") or "")
+
+            if isinstance(result, dict) and result.get("status") == "error":
+                summary = (
+                    f"{ticker} 文档Markdown获取失败: "
+                    f"{result.get('error') or 'unknown error'}"
+                )
+                artifact = create_artifact_envelope(
+                    component_type="filing_document",
+                    name=f"{ticker} SEC文档Markdown",
+                    content=result,
+                    description=summary,
+                    visible_to_llm=True,
+                    display_in_report=False,
+                )
+                return create_artifact_response(summary=summary, artifact=artifact)
+
+            summary = (
+                f"{ticker} 文档Markdown获取完成: {doc_id}, "
+                f"cached={bool(result.get('cached')) if isinstance(result, dict) else False}, "
+                f"length={len(markdown)} chars"
+            )
+            artifact = create_artifact_envelope(
+                component_type="filing_document",
+                name=f"{ticker} SEC文档Markdown",
+                content=result,
+                description=summary,
+                visible_to_llm=False,
+                display_in_report=False,
+            )
+            if ctx:
+                await ctx.info(
+                    f"✅ SEC文档Markdown获取完成: {ticker}",
+                    extra={
+                        "doc_id": doc_id,
+                        "cached": bool(result.get("cached"))
+                        if isinstance(result, dict)
+                        else False,
+                        "length": len(markdown),
+                    },
+                )
+            return create_artifact_response(summary=summary, artifact=artifact)
+
+        except SymbolResolutionError as e:
+            if ctx:
+                await ctx.warning(f"⚠️ 符号解析失败: {ticker}", extra=e.to_dict())
+            return create_symbol_error_response(
+                e, component_type="filing_document", name=f"{ticker} SEC文档Markdown"
+            )
+        except Exception as e:
+            logger.error(f"Get filing markdown failed: {e}")
+            if ctx:
+                await ctx.error(
+                    f"❌ 获取SEC文档Markdown失败: {ticker}",
+                    extra={"error": str(e)},
+                )
+            return {"error": str(e)}
+
+    @mcp.tool(tags={"filings"})
+    async def extract_filing_key_metrics(
+        ticker: str,
+        doc_id: str,
+        metric_hints: list[str] = None,
+        max_items: int = 30,
+        ctx: Context = None,
+    ) -> Dict[str, Any]:
+        """Extract metric-like lines from filing markdown for quick evidence pickup."""
+        default_hints = [
+            "revenue",
+            "net income",
+            "operating income",
+            "eps",
+            "margin",
+            "capex",
+            "guidance",
+            "收入",
+            "净利润",
+            "毛利率",
+            "现金流",
+            "资本开支",
+            "同比",
+        ]
+        hints = metric_hints or default_hints
+        max_items = max(5, min(int(max_items), 100))
+        if ctx:
+            await ctx.info(
+                f"🔧 提取文档关键指标: {ticker} {doc_id}",
+                extra={"ticker": ticker, "doc_id": doc_id, "max_items": max_items},
+            )
+
+        try:
+            markdown_result = await filings_use_cases.get_filing_markdown(
+                ticker=ticker,
+                doc_id=doc_id,
+            )
+            markdown = (
+                str(markdown_result.get("content") or "")
+                if isinstance(markdown_result, dict)
+                else ""
+            )
+            items = _extract_metric_lines(markdown, hints, max_items=max_items)
+            summary = (
+                f"{ticker} 关键指标提取完成: {len(items)}条, "
+                f"doc_id={doc_id}, cached={bool(markdown_result.get('cached')) if isinstance(markdown_result, dict) else False}"
+            )
+            artifact = create_artifact_envelope(
+                component_type="table",
+                name=f"{ticker} Filing Key Metrics",
+                content={
+                    "ticker": ticker,
+                    "doc_id": doc_id,
+                    "items": items,
+                    "metric_hints": hints,
+                },
+                description=summary,
+                visible_to_llm=True,
+                display_in_report=True,
+            )
+            return create_artifact_response(summary=summary, artifact=artifact)
+        except SymbolResolutionError as e:
+            return create_symbol_error_response(
+                e, component_type="table", name=f"{ticker} Filing Key Metrics"
+            )
+        except Exception as e:
+            logger.error(f"Extract filing key metrics failed: {e}")
+            return {"error": str(e)}
+
+    @mcp.tool(tags={"filings"})
+    async def extract_filing_section_facts(
+        ticker: str,
+        doc_id: str,
+        section_hints: list[str] = None,
+        max_quotes_per_section: int = 5,
+        ctx: Context = None,
+    ) -> Dict[str, Any]:
+        """Extract section-level fact snippets from filing markdown."""
+        default_sections = ["item 1a", "item 7", "item 8", "risk factors", "md&a"]
+        hints = section_hints or default_sections
+        max_quotes = max(1, min(int(max_quotes_per_section), 20))
+        if ctx:
+            await ctx.info(
+                f"🔧 提取文档章节事实: {ticker} {doc_id}",
+                extra={
+                    "ticker": ticker,
+                    "doc_id": doc_id,
+                    "section_hints": hints,
+                },
+            )
+
+        try:
+            markdown_result = await filings_use_cases.get_filing_markdown(
+                ticker=ticker,
+                doc_id=doc_id,
+            )
+            markdown = (
+                str(markdown_result.get("content") or "")
+                if isinstance(markdown_result, dict)
+                else ""
+            )
+            sections = _extract_section_facts(
+                markdown,
+                hints,
+                max_quotes_per_section=max_quotes,
+            )
+            summary = (
+                f"{ticker} 章节事实提取完成: {len(sections)}个章节, "
+                f"doc_id={doc_id}"
+            )
+            artifact = create_artifact_envelope(
+                component_type="table",
+                name=f"{ticker} Filing Section Facts",
+                content={
+                    "ticker": ticker,
+                    "doc_id": doc_id,
+                    "sections": sections,
+                    "section_hints": hints,
+                },
+                description=summary,
+                visible_to_llm=True,
+                display_in_report=True,
+            )
+            return create_artifact_response(summary=summary, artifact=artifact)
+        except SymbolResolutionError as e:
+            return create_symbol_error_response(
+                e, component_type="table", name=f"{ticker} Filing Section Facts"
+            )
+        except Exception as e:
+            logger.error(f"Extract filing section facts failed: {e}")
+            return {"error": str(e)}
+
+    @mcp.tool(tags={"filings"})
+    async def build_filing_citations(
+        ticker: str,
+        doc_id: str,
+        metric_hints: list[str] = None,
+        max_items: int = 15,
+        ctx: Context = None,
+    ) -> Dict[str, Any]:
+        """Build lightweight citation candidates from filing metric lines."""
+        max_items = max(5, min(int(max_items), 50))
+        try:
+            markdown_result = await filings_use_cases.get_filing_markdown(
+                ticker=ticker,
+                doc_id=doc_id,
+            )
+            markdown = (
+                str(markdown_result.get("content") or "")
+                if isinstance(markdown_result, dict)
+                else ""
+            )
+            metric_items = _extract_metric_lines(
+                markdown,
+                metric_hints or ["revenue", "net income", "eps", "收入", "净利润", "毛利率"],
+                max_items=max_items,
+            )
+            citations = []
+            for item in metric_items[:max_items]:
+                line_no = item.get("line_no")
+                citations.append(
+                    {
+                        "ref_id": f"{doc_id}#L{line_no}",
+                        "ticker": ticker,
+                        "doc_id": doc_id,
+                        "line_no": line_no,
+                        "quote": item.get("text"),
+                        "numbers": item.get("numbers", []),
+                    }
+                )
+            summary = f"{ticker} 引用锚点构建完成: {len(citations)}条, doc_id={doc_id}"
+            artifact = create_artifact_envelope(
+                component_type="table",
+                name=f"{ticker} Filing Citations",
+                content={
+                    "ticker": ticker,
+                    "doc_id": doc_id,
+                    "citations": citations,
+                },
+                description=summary,
+                visible_to_llm=True,
+                display_in_report=False,
+            )
+            if ctx:
+                await ctx.info(
+                    f"✅ 文档引用锚点构建完成: {ticker}",
+                    extra={"doc_id": doc_id, "count": len(citations)},
+                )
+            return create_artifact_response(summary=summary, artifact=artifact)
+        except SymbolResolutionError as e:
+            return create_symbol_error_response(
+                e, component_type="table", name=f"{ticker} Filing Citations"
+            )
+        except Exception as e:
+            logger.error(f"Build filing citations failed: {e}")
             return {"error": str(e)}

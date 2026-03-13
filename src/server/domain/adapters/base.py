@@ -292,8 +292,19 @@ class BaseDataAdapter(abc.ABC):
             f"{self.source.value} does not support get_market_money_flow"
         )
 
+    async def resolve_sector(
+        self, query_text: str, intent: str = "trend"
+    ) -> Dict[str, Any]:
+        """解析板块查询词为稳定板块ID (Optional)."""
+        raise NotImplementedError(
+            f"{self.source.value} does not support resolve_sector"
+        )
+
     async def get_sector_trend(
-        self, sector_name: str, days: int = 10
+        self,
+        sector_name: str = "",
+        days: int = 10,
+        sector_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """获取板块走势数据 (Optional)."""
         raise NotImplementedError(
@@ -333,7 +344,10 @@ class BaseDataAdapter(abc.ABC):
         )
 
     async def get_sector_money_flow_history(
-        self, sector_name: str, days: int = 20
+        self,
+        sector_name: str = "",
+        days: int = 20,
+        sector_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """获取板块资金流向历史数据 (Optional)."""
         raise NotImplementedError(
@@ -341,7 +355,11 @@ class BaseDataAdapter(abc.ABC):
         )
 
     async def get_sector_valuation_metrics(
-        self, sector_name: str, days: int = 250, sample_size: int = 60
+        self,
+        sector_name: str = "",
+        days: int = 250,
+        sample_size: int = 60,
+        sector_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """获取板块估值指标与历史分位 (Optional)."""
         raise NotImplementedError(

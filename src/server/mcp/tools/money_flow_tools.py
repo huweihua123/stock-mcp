@@ -1317,61 +1317,155 @@ def register_money_flow_tools(mcp: FastMCP):
             return {"error": str(e), "component_type": "market_money_flow"}
 
     @mcp.tool(tags={"money-flow"})
-    async def get_sector_trend(
-        sector_name: str, days: int = 10, ctx: Context = None
+    async def resolve_sector(
+        query_text: str,
+        intent: str = "trend",
+        ctx: Context = None,
     ) -> Dict[str, Any]:
-        """获取板块近 N 天游势与累计涨跌幅."""
+        """解析板块查询词，返回稳定 sector_id（resolved/ambiguous/not_found）."""
         if ctx:
             await ctx.info(
-                "🔧 获取板块走势", extra={"sector_name": sector_name, "days": days}
+                "🔧 解析板块名称",
+                extra={"query_text": query_text, "intent": intent},
             )
 
         try:
             logger.info(
-                "MCP tool called: get_sector_trend", sector_name=sector_name, days=days
+                "MCP tool called: resolve_sector",
+                query_text=query_text,
+                intent=intent,
             )
-            result = await money_flow_use_cases.get_sector_trend(sector_name, days)
+            result = await money_flow_use_cases.resolve_sector(
+                query_text=query_text,
+                intent=intent,
+            )
+            status = result.get("status", "not_found")
+            canonical_name = result.get("canonical_name", "")
+            sector_id = result.get("sector_id", "")
+            candidates = result.get("candidates", []) or []
+
+            if status == "resolved":
+                summary_text = (
+                    f"板块解析成功: {query_text} -> {canonical_name}({sector_id})"
+                )
+            elif status == "ambiguous":
+                candidate_names = [
+                    str(x.get("canonical_name", ""))
+                    for x in candidates
+                    if isinstance(x, dict)
+                ]
+                summary_text = (
+                    f'板块名称"{query_text}"不明确，候选：'
+                    f"{'、'.join([x for x in candidate_names if x])}。"
+                )
+            else:
+                summary_text = f'未找到板块: "{query_text}"'
+
+            artifact = create_artifact_envelope(
+                component_type="sector_resolve",
+                name=f"Sector Resolve: {query_text}",
+                content={
+                    "query_text": query_text,
+                    "intent": intent,
+                    "status": status,
+                    "sector_id": sector_id,
+                    "canonical_name": canonical_name,
+                    "candidates": candidates,
+                    "source": result.get("source", ""),
+                },
+                description=summary_text,
+                metadata={
+                    "type": "sector_resolve",
+                    "query_text": query_text,
+                    "intent": intent,
+                    "status": status,
+                },
+                visible_to_llm=True,
+                display_in_report=False,
+            )
+
+            return create_artifact_response(summary=summary_text, artifact=artifact)
+        except Exception as e:
+            logger.error(f"Resolve sector failed: {e}", exc_info=True)
+            if ctx:
+                await ctx.error("❌ 板块解析失败", extra={"error": str(e)})
+            return {"error": str(e), "component_type": "sector_resolve"}
+
+    @mcp.tool(tags={"money-flow"})
+    async def get_sector_trend(
+        sector_name: str = "",
+        days: int = 10,
+        sector_id: str = "",
+        ctx: Context = None,
+    ) -> Dict[str, Any]:
+        """获取板块近 N 天游势与累计涨跌幅."""
+        if ctx:
+            await ctx.info(
+                "🔧 获取板块走势",
+                extra={"sector_name": sector_name, "sector_id": sector_id, "days": days},
+            )
+
+        try:
+            logger.info(
+                "MCP tool called: get_sector_trend",
+                sector_name=sector_name,
+                sector_id=sector_id,
+                days=days,
+            )
+            result = await money_flow_use_cases.get_sector_trend(
+                sector_name=sector_name,
+                sector_id=sector_id or None,
+                days=days,
+            )
+            query_label = sector_name or sector_id or "unknown"
 
             # ── 候选列表：板块名称模糊匹配返回多个候选时 ──────────────────
             if result.get("candidates"):
                 candidates: list = result["candidates"]
                 candidates_str = "、".join(candidates)
                 summary_text = (
-                    f'板块名称"{sector_name}"不明确，找到以下候选板块：{candidates_str}。'
+                    f'板块名称"{query_label}"不明确，找到以下候选板块：{candidates_str}。'
                     f"请用精确名称重新查询，例如直接使用上述某个名称。"
                 )
                 artifact = create_artifact_envelope(
                     component_type="sector_trend",
-                    name=f"Sector Trend: {sector_name}",
+                    name=f"Sector Trend: {query_label}",
                     content={
-                        "sector_name": sector_name,
+                        "sector_name": query_label,
+                        "index_code": "",
                         "days": days,
                         "candidates": candidates,
                         "total_pct_chg": 0,
                         "trend": [],
                     },
                     description=summary_text,
-                    metadata={"type": "sector_trend", "sector_name": sector_name},
+                    metadata={"type": "sector_trend", "sector_name": query_label},
                     visible_to_llm=True,
                 )
                 return create_artifact_response(summary=summary_text, artifact=artifact)
 
+            index_name = result.get("sector_name") or query_label
+            index_code = result.get("index_code", "")
             total_pct = result.get("total_pct_chg", 0)
-            summary_text = (
-                f"{sector_name}板块走势（最近{days}天). 累计涨跌幅: {total_pct:+.2f}%."
-            )
+            name_with_code = f"{index_name}({index_code})" if index_code else index_name
+            summary_text = f"{name_with_code}板块走势（最近{days}天). 累计涨跌幅: {total_pct:+.2f}%."
 
             artifact = create_artifact_envelope(
                 component_type="sector_trend",
-                name=f"Sector Trend: {sector_name}",
+                name=f"Sector Trend: {index_name}",
                 content={
-                    "sector_name": sector_name,
+                    "sector_name": index_name,
+                    "index_code": index_code,
                     "days": days,
                     "total_pct_chg": total_pct,
                     "trend": result.get("trend", []),
                 },
                 description=summary_text,
-                metadata={"type": "sector_trend", "sector_name": sector_name},
+                metadata={
+                    "type": "sector_trend",
+                    "sector_name": index_name,
+                    "index_code": index_code,
+                },
             )
 
             return create_artifact_response(summary=summary_text, artifact=artifact)
@@ -1437,8 +1531,9 @@ def register_money_flow_tools(mcp: FastMCP):
 
     @mcp.tool(tags={"money-flow"})
     async def get_sector_money_flow_history(
-        sector_name: str,
+        sector_name: str = "",
         days: int = 20,
+        sector_id: str = "",
         ctx: Context = None,
     ) -> Dict[str, Any]:
         """获取板块资金流向历史数据
@@ -1457,40 +1552,44 @@ def register_money_flow_tools(mcp: FastMCP):
         """
         if ctx:
             await ctx.info(
-                f"🔧 获取板块资金流向: {sector_name}",
-                extra={"sector_name": sector_name, "days": days},
+                "🔧 获取板块资金流向",
+                extra={"sector_name": sector_name, "sector_id": sector_id, "days": days},
             )
 
         try:
             logger.info(
                 "MCP tool called: get_sector_money_flow_history",
                 sector_name=sector_name,
+                sector_id=sector_id,
                 days=days,
             )
             result = await money_flow_use_cases.get_sector_money_flow_history(
-                sector_name, days
+                sector_name=sector_name,
+                days=days,
+                sector_id=sector_id or None,
             )
+            query_label = sector_name or sector_id or "unknown"
 
             # ── 候选列表：板块名称模糊匹配返回多个候选时 ──────────────────
             if result.get("candidates"):
                 candidates: list = result["candidates"]
                 candidates_str = "、".join(candidates)
                 summary_text = (
-                    f'板块名称"{sector_name}"不明确，找到以下候选板块：{candidates_str}。'
+                    f'板块名称"{query_label}"不明确，找到以下候选板块：{candidates_str}。'
                     f"请用精确名称重新查询，例如直接使用上述某个名称。"
                 )
                 empty_artifact = create_artifact_envelope(
                     component_type="sector_flow",
-                    name=f"Sector Money Flow: {sector_name}",
+                    name=f"Sector Money Flow: {query_label}",
                     content={
-                        "sector_name": sector_name,
+                        "sector_name": query_label,
                         "index_code": "",
                         "has_money_flow": False,
                         "records": [],
                         "candidates": candidates,
                     },
                     description=summary_text,
-                    metadata={"type": "sector_flow", "sector_name": sector_name},
+                    metadata={"type": "sector_flow", "sector_name": query_label},
                     visible_to_llm=True,
                 )
                 return create_artifact_response(
@@ -1505,16 +1604,16 @@ def register_money_flow_tools(mcp: FastMCP):
                 if candidates:
                     candidates_str = "、".join(candidates)
                     summary_text = (
-                        f'板块名称"{sector_name}"不明确，找到以下候选板块：{candidates_str}。'
+                        f'板块名称"{query_label}"不明确，找到以下候选板块：{candidates_str}。'
                         f"请用精确名称重新查询，例如直接使用上述某个名称。"
                     )
                 else:
                     summary_text = f"未找到板块数据: {err_msg}"
                 empty_artifact = create_artifact_envelope(
                     component_type="sector_flow",
-                    name=f"Sector Money Flow: {sector_name}",
+                    name=f"Sector Money Flow: {query_label}",
                     content={
-                        "sector_name": sector_name,
+                        "sector_name": query_label,
                         "index_code": "",
                         "has_money_flow": False,
                         "records": [],
@@ -1522,7 +1621,7 @@ def register_money_flow_tools(mcp: FastMCP):
                         "candidates": candidates,
                     },
                     description=summary_text,
-                    metadata={"type": "sector_flow", "sector_name": sector_name},
+                    metadata={"type": "sector_flow", "sector_name": query_label},
                     visible_to_llm=bool(candidates),
                     display_in_report=True,
                 )
@@ -1531,7 +1630,7 @@ def register_money_flow_tools(mcp: FastMCP):
                     artifact=empty_artifact,
                 )
 
-            index_name = result.get("sector_name", sector_name)
+            index_name = result.get("sector_name", query_label)
             index_code = result.get("index_code", "")
             records = result.get("records", [])
             summary_info = result.get("summary", {})
@@ -1548,10 +1647,8 @@ def register_money_flow_tools(mcp: FastMCP):
             total_main = summary_info.get("total_main_net")
             flow_source = summary_info.get("flow_source")
 
-            lines = [
-                f"{index_name}({index_code}) 板块资金流向 (近{len(records)}日):",
-                f"- 区间涨跌幅: {total_pct:.2f}%",
-            ]
+            name_with_code = f"{index_name}({index_code})" if index_code else index_name
+            lines = [f"{name_with_code} 板块资金流向 (近{len(records)}日):", f"- 区间涨跌幅: {total_pct:.2f}%"]
             if has_flow and total_main is not None:
                 lines.append(
                     f"- 主力累计净流入: {_fmt_amount(total_main, amount_unit)}"
@@ -1599,7 +1696,7 @@ def register_money_flow_tools(mcp: FastMCP):
             )
             if ctx:
                 await ctx.error(
-                    f"❌ 获取板块资金流向失败: {sector_name}",
+                    f"❌ 获取板块资金流向失败: {sector_name or sector_id or 'unknown'}",
                     extra={"error": str(e)},
                 )
             return {
@@ -1609,9 +1706,10 @@ def register_money_flow_tools(mcp: FastMCP):
 
     @mcp.tool(tags={"money-flow"})
     async def get_sector_valuation_metrics(
-        sector_name: str,
+        sector_name: str = "",
         days: int = 250,
         sample_size: int = 60,
+        sector_id: str = "",
         ctx: Context = None,
     ) -> Dict[str, Any]:
         """获取板块估值指标与历史分位（PE/PB）.
@@ -1621,9 +1719,10 @@ def register_money_flow_tools(mcp: FastMCP):
         """
         if ctx:
             await ctx.info(
-                f"🔧 获取板块估值: {sector_name}",
+                "🔧 获取板块估值",
                 extra={
                     "sector_name": sector_name,
+                    "sector_id": sector_id,
                     "days": days,
                     "sample_size": sample_size,
                 },
@@ -1633,6 +1732,7 @@ def register_money_flow_tools(mcp: FastMCP):
             logger.info(
                 "MCP tool called: get_sector_valuation_metrics",
                 sector_name=sector_name,
+                sector_id=sector_id,
                 days=days,
                 sample_size=sample_size,
             )
@@ -1640,19 +1740,21 @@ def register_money_flow_tools(mcp: FastMCP):
                 sector_name=sector_name,
                 days=days,
                 sample_size=sample_size,
+                sector_id=sector_id or None,
             )
+            query_label = sector_name or sector_id or "unknown"
 
             if result.get("candidates"):
                 candidates = result.get("candidates", [])
                 summary_text = (
-                    f'板块名称"{sector_name}"不明确，候选：'
+                    f'板块名称"{query_label}"不明确，候选：'
                     f"{'、'.join(candidates)}。请使用精确板块名称重试。"
                 )
                 artifact = create_artifact_envelope(
                     component_type="sector_valuation_metrics",
-                    name=f"Sector Valuation: {sector_name}",
+                    name=f"Sector Valuation: {query_label}",
                     content={
-                        "sector_name": sector_name,
+                        "sector_name": query_label,
                         "index_code": "",
                         "candidates": candidates,
                         "history": [],
@@ -1660,7 +1762,7 @@ def register_money_flow_tools(mcp: FastMCP):
                     description=summary_text,
                     metadata={
                         "type": "sector_valuation_metrics",
-                        "sector_name": sector_name,
+                        "sector_name": query_label,
                     },
                     visible_to_llm=True,
                     display_in_report=True,
@@ -1671,9 +1773,9 @@ def register_money_flow_tools(mcp: FastMCP):
                 summary_text = f"板块估值数据不可用: {result.get('error')}"
                 artifact = create_artifact_envelope(
                     component_type="sector_valuation_metrics",
-                    name=f"Sector Valuation: {sector_name}",
+                    name=f"Sector Valuation: {query_label}",
                     content={
-                        "sector_name": sector_name,
+                        "sector_name": query_label,
                         "index_code": result.get("index_code", ""),
                         "history": [],
                         "error": result.get("error"),
@@ -1681,14 +1783,14 @@ def register_money_flow_tools(mcp: FastMCP):
                     description=summary_text,
                     metadata={
                         "type": "sector_valuation_metrics",
-                        "sector_name": sector_name,
+                        "sector_name": query_label,
                     },
                     visible_to_llm=True,
                     display_in_report=True,
                 )
                 return create_artifact_response(summary=summary_text, artifact=artifact)
 
-            sector = result.get("sector_name", sector_name)
+            sector = result.get("sector_name", query_label)
             index_code = result.get("index_code", "")
             current = result.get("current", {}) or {}
             summary = result.get("summary", {}) or {}
@@ -1757,7 +1859,7 @@ def register_money_flow_tools(mcp: FastMCP):
             logger.error(f"Get sector valuation metrics failed: {e}", exc_info=True)
             if ctx:
                 await ctx.error(
-                    f"❌ 获取板块估值失败: {sector_name}",
+                    f"❌ 获取板块估值失败: {sector_name or sector_id or 'unknown'}",
                     extra={"error": str(e)},
                 )
             return {

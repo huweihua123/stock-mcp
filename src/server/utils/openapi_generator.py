@@ -104,7 +104,10 @@ class OpenAPIGenerator:
             "get_shareholder_info": "Fundamental Tools",
             "get_market_liquidity": "Market Tools",
             "get_market_money_flow": "Market Tools",
+            "resolve_sector": "Market Tools",
             "get_sector_trend": "Market Tools",
+            "get_sector_money_flow_history": "Market Tools",
+            "get_sector_valuation_metrics": "Market Tools",
             "get_ggt_daily": "Market Tools",
             "get_money_supply": "Market Tools",
             "get_inflation_data": "Market Tools",
@@ -112,6 +115,9 @@ class OpenAPIGenerator:
             "get_gdp_data": "Market Tools",
             "get_social_financing": "Market Tools",
             "get_interest_rates": "Market Tools",
+            "get_us_economic_growth": "Market Tools",
+            "get_us_inflation_employment": "Market Tools",
+            "get_us_interest_rates": "Market Tools",
             "get_latest_news": "News Tools",
             "perform_deep_research": "Research Tools",
             "get_technical_indicators": "Technical Tools",
@@ -120,6 +126,12 @@ class OpenAPIGenerator:
             "fetch_periodic_sec_filings": "Filings Tools",
             "fetch_event_sec_filings": "Filings Tools",
             "fetch_ashare_filings": "Filings Tools",
+            "resolve_sector_scope": "Research Tools",
+            "build_sector_universe": "Research Tools",
+            "build_peer_benchmark_table": "Research Tools",
+            "build_sector_evidence_pack": "Research Tools",
+            "build_sector_structure_snapshot": "Research Tools",
+            "quality_gate_sector_report": "Research Tools",
         }
 
         for tool_name, group in tool_groups.items():
