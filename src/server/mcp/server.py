@@ -45,9 +45,9 @@ from src.server.mcp.capability_contract import (
     install_capability_contract,
     register_capability_tools,
 )
-from src.server.mcp.tools.artifact_utils import (
-    create_artifact_envelope,
-    create_artifact_response,
+from src.server.mcp.envelope import (
+    normalize_tool_exception as _normalize_tool_exception_impl,
+    normalize_tool_result as _normalize_tool_result_impl,
 )
 
 
@@ -66,25 +66,17 @@ async def mcp_lifespan(mcp: FastMCP):
 
 
 def _normalize_tool_result(tool_name: str, result: Any) -> Any:
-    """Ensure error responses include summary for LLM visibility."""
-    if not isinstance(result, dict):
-        return result
-    if "summary" in result:
-        return result
-    if "error" not in result:
-        return result
+    """Normalize all tool outputs into strict envelope format."""
+    return _normalize_tool_result_impl(tool_name, result)
 
-    reason = str(result.get("error") or "unknown error")
-    summary = f"工具 {tool_name} 执行失败: {reason}"
-    artifact = create_artifact_envelope(
-        component_type=result.get("component_type", "tool_call"),
-        name=f"{tool_name} error",
-        content=result,
-        description=summary,
-        visible_to_llm=True,
-        display_in_report=True,
+
+def _normalize_tool_exception(
+    tool_name: str, error: Exception, *, timeout_seconds: float | None = None
+) -> Any:
+    """Normalize tool exceptions into strict failed envelopes."""
+    return _normalize_tool_exception_impl(
+        tool_name, error, timeout_seconds=timeout_seconds
     )
-    return create_artifact_response(summary=summary, artifact=artifact)
 
 
 def _install_tool_guard(mcp: FastMCP, tool_timeout_seconds: float) -> None:
@@ -103,25 +95,19 @@ def _install_tool_guard(mcp: FastMCP, tool_timeout_seconds: float) -> None:
                     )
                     return _normalize_tool_result(func.__name__, result)
                 except asyncio.TimeoutError:
-                    reason = (
+                    logger.error(
                         f"工具 {func.__name__} 超时: 超过 {tool_timeout_seconds:.1f}s 全局限制"
                     )
-                    logger.error(reason)
-                    artifact = create_artifact_envelope(
-                        component_type="tool_call",
-                        name=f"{func.__name__} timeout",
-                        content={
-                            "error": "timeout",
-                            "reason": reason,
-                            "tool": func.__name__,
-                            "timeout_seconds": tool_timeout_seconds,
-                            "component_type": "tool_call",
-                        },
-                        description=reason,
-                        visible_to_llm=True,
-                        display_in_report=True,
+                    return _normalize_tool_exception(
+                        func.__name__,
+                        asyncio.TimeoutError(),
+                        timeout_seconds=tool_timeout_seconds,
                     )
-                    return create_artifact_response(summary=reason, artifact=artifact)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.exception("工具执行异常", tool_name=func.__name__)
+                    return _normalize_tool_exception(func.__name__, exc)
 
             return base_decorator(wrapped)
 
