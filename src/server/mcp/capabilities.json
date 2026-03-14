@@ -1,0 +1,325 @@
+{
+  "contract_version": "1.0.0",
+  "capability_stability": "stable",
+  "capability_tag_prefix": "cap:",
+  "bindings": {
+    "build_filing_citations": {
+      "capability_id": "filings.document.citations.build",
+      "capability_version": "1.0.0",
+      "input_schema": "filings.document.citations.build.input.v1",
+      "output_schema": "filings.document.citations.build.output.v1"
+    },
+    "build_peer_benchmark_table": {
+      "capability_id": "cn_sector.research.peer_benchmark.build",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_sector.research.peer_benchmark.build.input.v1",
+      "output_schema": "cn_sector.research.peer_benchmark.build.output.v1"
+    },
+    "build_sector_evidence_pack": {
+      "capability_id": "cn_sector.research.evidence_pack.build",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_sector.research.evidence_pack.build.input.v1",
+      "output_schema": "cn_sector.research.evidence_pack.build.output.v1"
+    },
+    "build_sector_structure_snapshot": {
+      "capability_id": "cn_sector.research.structure_snapshot.build",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_sector.research.structure_snapshot.build.input.v1",
+      "output_schema": "cn_sector.research.structure_snapshot.build.output.v1"
+    },
+    "build_sector_universe": {
+      "capability_id": "cn_sector.research.universe.build",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_sector.research.universe.build.input.v1",
+      "output_schema": "cn_sector.research.universe.build.output.v1"
+    },
+    "classify_value_chain": {
+      "capability_id": "cn_sector.research.value_chain.classify",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_sector.research.value_chain.classify.input.v1",
+      "output_schema": "cn_sector.research.value_chain.classify.output.v1"
+    },
+    "extract_filing_key_metrics": {
+      "capability_id": "filings.document.metrics.extract",
+      "capability_version": "1.0.0",
+      "input_schema": "filings.document.metrics.extract.input.v1",
+      "output_schema": "filings.document.metrics.extract.output.v1"
+    },
+    "extract_filing_section_facts": {
+      "capability_id": "filings.document.facts.extract",
+      "capability_version": "1.0.0",
+      "input_schema": "filings.document.facts.extract.input.v1",
+      "output_schema": "filings.document.facts.extract.output.v1"
+    },
+    "fetch_ashare_filings": {
+      "capability_id": "filings.cn.fetch",
+      "capability_version": "1.0.0",
+      "input_schema": "filings.cn.fetch.input.v1",
+      "output_schema": "filings.cn.fetch.output.v1"
+    },
+    "fetch_event_sec_filings": {
+      "capability_id": "filings.sec.event.fetch",
+      "capability_version": "1.0.0",
+      "input_schema": "filings.sec.event.fetch.input.v1",
+      "output_schema": "filings.sec.event.fetch.output.v1"
+    },
+    "fetch_periodic_sec_filings": {
+      "capability_id": "filings.sec.periodic.fetch",
+      "capability_version": "1.0.0",
+      "input_schema": "filings.sec.periodic.fetch.input.v1",
+      "output_schema": "filings.sec.periodic.fetch.output.v1"
+    },
+    "get_cash_flow_quality": {
+      "capability_id": "us_stock.fundamental.cash_flow_quality",
+      "capability_version": "1.0.0",
+      "input_schema": "us_stock.fundamental.cash_flow_quality.input.v1",
+      "output_schema": "us_stock.fundamental.cash_flow_quality.output.v1"
+    },
+    "get_chip_distribution": {
+      "capability_id": "cn_stock.microstructure.chip_distribution",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_stock.microstructure.chip_distribution.input.v1",
+      "output_schema": "cn_stock.microstructure.chip_distribution.output.v1"
+    },
+    "get_dividend_info": {
+      "capability_id": "cn_stock.fundamental.dividends",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_stock.fundamental.dividends.input.v1",
+      "output_schema": "cn_stock.fundamental.dividends.output.v1"
+    },
+    "get_document_chunks": {
+      "capability_id": "filings.document.chunks.get",
+      "capability_version": "1.0.0",
+      "input_schema": "filings.document.chunks.get.input.v1",
+      "output_schema": "filings.document.chunks.get.output.v1"
+    },
+    "get_earnings_history": {
+      "capability_id": "us_stock.fundamental.earnings_history",
+      "capability_version": "1.0.0",
+      "input_schema": "us_stock.fundamental.earnings_history.input.v1",
+      "output_schema": "us_stock.fundamental.earnings_history.output.v1"
+    },
+    "get_filing_markdown": {
+      "capability_id": "filings.document.markdown",
+      "capability_version": "1.0.0",
+      "input_schema": "filings.document.markdown.input.v1",
+      "output_schema": "filings.document.markdown.output.v1"
+    },
+    "get_financial_reports": {
+      "capability_id": "cn_stock.fundamental.financial_reports",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_stock.fundamental.financial_reports.input.v1",
+      "output_schema": "cn_stock.fundamental.financial_reports.output.v1"
+    },
+    "get_forecast_info": {
+      "capability_id": "cn_stock.fundamental.earnings_forecast",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_stock.fundamental.earnings_forecast.input.v1",
+      "output_schema": "cn_stock.fundamental.earnings_forecast.output.v1"
+    },
+    "get_gdp_data": {
+      "capability_id": "cn_macro.gdp",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_macro.gdp.input.v1",
+      "output_schema": "cn_macro.gdp.output.v1"
+    },
+    "get_ggt_daily": {
+      "capability_id": "cn_market.flow.ggt_daily",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_market.flow.ggt_daily.input.v1",
+      "output_schema": "cn_market.flow.ggt_daily.output.v1"
+    },
+    "get_inflation_data": {
+      "capability_id": "cn_macro.inflation",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_macro.inflation.input.v1",
+      "output_schema": "cn_macro.inflation.output.v1"
+    },
+    "get_interest_rates": {
+      "capability_id": "cn_macro.interest_rates",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_macro.interest_rates.input.v1",
+      "output_schema": "cn_macro.interest_rates.output.v1"
+    },
+    "get_kline_data": {
+      "capability_id": "cn_stock.market.kline",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_stock.market.kline.input.v1",
+      "output_schema": "cn_stock.market.kline.output.v1"
+    },
+    "get_mainbz_info": {
+      "capability_id": "cn_stock.fundamental.main_business",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_stock.fundamental.main_business.input.v1",
+      "output_schema": "cn_stock.fundamental.main_business.output.v1"
+    },
+    "get_market_liquidity": {
+      "capability_id": "cn_market.liquidity",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_market.liquidity.input.v1",
+      "output_schema": "cn_market.liquidity.output.v1"
+    },
+    "get_market_money_flow": {
+      "capability_id": "cn_market.flow.sector_rank",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_market.flow.sector_rank.input.v1",
+      "output_schema": "cn_market.flow.sector_rank.output.v1"
+    },
+    "get_money_flow": {
+      "capability_id": "cn_stock.flow.money",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_stock.flow.money.input.v1",
+      "output_schema": "cn_stock.flow.money.output.v1"
+    },
+    "get_money_supply": {
+      "capability_id": "cn_macro.money_supply",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_macro.money_supply.input.v1",
+      "output_schema": "cn_macro.money_supply.output.v1"
+    },
+    "get_north_bound_flow": {
+      "capability_id": "cn_market.flow.north_bound",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_market.flow.north_bound.input.v1",
+      "output_schema": "cn_market.flow.north_bound.output.v1"
+    },
+    "get_pmi_data": {
+      "capability_id": "cn_macro.pmi",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_macro.pmi.input.v1",
+      "output_schema": "cn_macro.pmi.output.v1"
+    },
+    "get_sector_money_flow_history": {
+      "capability_id": "cn_sector.flow.history",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_sector.flow.history.input.v1",
+      "output_schema": "cn_sector.flow.history.output.v1"
+    },
+    "get_sector_trend": {
+      "capability_id": "cn_sector.trend",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_sector.trend.input.v1",
+      "output_schema": "cn_sector.trend.output.v1"
+    },
+    "get_sector_valuation_metrics": {
+      "capability_id": "cn_sector.valuation.metrics",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_sector.valuation.metrics.input.v1",
+      "output_schema": "cn_sector.valuation.metrics.output.v1"
+    },
+    "get_shareholder_info": {
+      "capability_id": "cn_stock.fundamental.shareholders",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_stock.fundamental.shareholders.input.v1",
+      "output_schema": "cn_stock.fundamental.shareholders.output.v1"
+    },
+    "get_social_financing": {
+      "capability_id": "cn_macro.social_financing",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_macro.social_financing.input.v1",
+      "output_schema": "cn_macro.social_financing.output.v1"
+    },
+    "get_technical_indicators": {
+      "capability_id": "cn_stock.technical.indicators",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_stock.technical.indicators.input.v1",
+      "output_schema": "cn_stock.technical.indicators.output.v1"
+    },
+    "get_us_economic_growth": {
+      "capability_id": "us_macro.economic_growth",
+      "capability_version": "1.0.0",
+      "input_schema": "us_macro.economic_growth.input.v1",
+      "output_schema": "us_macro.economic_growth.output.v1"
+    },
+    "get_us_inflation_employment": {
+      "capability_id": "us_macro.inflation_employment",
+      "capability_version": "1.0.0",
+      "input_schema": "us_macro.inflation_employment.input.v1",
+      "output_schema": "us_macro.inflation_employment.output.v1"
+    },
+    "get_us_institutional_holdings": {
+      "capability_id": "us_stock.fundamental.institutional_holdings",
+      "capability_version": "1.0.0",
+      "input_schema": "us_stock.fundamental.institutional_holdings.input.v1",
+      "output_schema": "us_stock.fundamental.institutional_holdings.output.v1"
+    },
+    "get_us_interest_rates": {
+      "capability_id": "us_macro.interest_rates",
+      "capability_version": "1.0.0",
+      "input_schema": "us_macro.interest_rates.input.v1",
+      "output_schema": "us_macro.interest_rates.output.v1"
+    },
+    "get_us_price_history": {
+      "capability_id": "us_stock.market.price_history",
+      "capability_version": "1.0.0",
+      "input_schema": "us_stock.market.price_history.input.v1",
+      "output_schema": "us_stock.market.price_history.output.v1"
+    },
+    "get_us_sector_etf_analysis": {
+      "capability_id": "us_sector.etf.analysis",
+      "capability_version": "1.0.0",
+      "input_schema": "us_sector.etf.analysis.input.v1",
+      "output_schema": "us_sector.etf.analysis.output.v1"
+    },
+    "get_us_technical_indicators": {
+      "capability_id": "us_stock.technical.indicators",
+      "capability_version": "1.0.0",
+      "input_schema": "us_stock.technical.indicators.input.v1",
+      "output_schema": "us_stock.technical.indicators.output.v1"
+    },
+    "get_us_valuation_metrics": {
+      "capability_id": "us_stock.valuation.metrics",
+      "capability_version": "1.0.0",
+      "input_schema": "us_stock.valuation.metrics.input.v1",
+      "output_schema": "us_stock.valuation.metrics.output.v1"
+    },
+    "get_us_volume_analysis": {
+      "capability_id": "us_stock.technical.volume_analysis",
+      "capability_version": "1.0.0",
+      "input_schema": "us_stock.technical.volume_analysis.input.v1",
+      "output_schema": "us_stock.technical.volume_analysis.output.v1"
+    },
+    "get_valuation_metrics": {
+      "capability_id": "cn_stock.valuation.metrics",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_stock.valuation.metrics.input.v1",
+      "output_schema": "cn_stock.valuation.metrics.output.v1"
+    },
+    "list_capabilities": {
+      "capability_id": "mcp.contract.capabilities.list",
+      "capability_version": "1.0.0",
+      "input_schema": "mcp.contract.capabilities.list.input.v1",
+      "output_schema": "mcp.contract.capabilities.list.output.v1"
+    },
+    "process_document": {
+      "capability_id": "filings.document.process",
+      "capability_version": "1.0.0",
+      "input_schema": "filings.document.process.input.v1",
+      "output_schema": "filings.document.process.output.v1"
+    },
+    "quality_gate_sector_report": {
+      "capability_id": "cn_sector.research.quality_gate",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_sector.research.quality_gate.input.v1",
+      "output_schema": "cn_sector.research.quality_gate.output.v1"
+    },
+    "resolve_sector": {
+      "capability_id": "cn_sector.resolve",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_sector.resolve.input.v1",
+      "output_schema": "cn_sector.resolve.output.v1"
+    },
+    "resolve_sector_scope": {
+      "capability_id": "cn_sector.research.scope.resolve",
+      "capability_version": "1.0.0",
+      "input_schema": "cn_sector.research.scope.resolve.input.v1",
+      "output_schema": "cn_sector.research.scope.resolve.output.v1"
+    },
+    "us_technical_analysis_summary": {
+      "capability_id": "us_stock.technical.summary",
+      "capability_version": "1.0.0",
+      "input_schema": "us_stock.technical.summary.input.v1",
+      "output_schema": "us_stock.technical.summary.output.v1"
+    }
+  }
+}

@@ -8,6 +8,7 @@ server setup, docs, and helper functions.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Callable, Dict, List
 
 from fastmcp import FastMCP
@@ -139,12 +140,30 @@ def register_tools(mcp: FastMCP) -> None:
             group.register(mcp)
 
 
+@lru_cache(maxsize=1)
+def _get_runtime_group_counts() -> Dict[str, int]:
+    """Compute per-group tool counts by real registration, not manual metadata."""
+    counts: Dict[str, int] = {}
+    for group in TOOL_GROUPS:
+        if not group.enabled:
+            counts[group.name] = 0
+            continue
+
+        probe = FastMCP(name=f"count-probe-{group.name}", version="0.0.0")
+        group.register(probe)
+        tool_manager = getattr(probe, "_tool_manager", None)
+        tools = getattr(tool_manager, "_tools", {}) if tool_manager else {}
+        counts[group.name] = len(tools) if isinstance(tools, dict) else int(group.count)
+    return counts
+
+
 def get_tool_group_info() -> Dict[str, Dict[str, str | int | bool]]:
     """Return tool group metadata for server info endpoints."""
+    runtime_counts = _get_runtime_group_counts()
     info: Dict[str, Dict[str, str | int | bool]] = {}
     for group in TOOL_GROUPS:
         info[group.name] = {
-            "count": group.count if group.enabled else 0,
+            "count": runtime_counts.get(group.name, 0) if group.enabled else 0,
             "description": group.description,
             "enabled": group.enabled,
         }
@@ -152,4 +171,4 @@ def get_tool_group_info() -> Dict[str, Dict[str, str | int | bool]]:
 
 
 def get_enabled_tool_count() -> int:
-    return sum(group.count for group in TOOL_GROUPS if group.enabled)
+    return sum(_get_runtime_group_counts().values())

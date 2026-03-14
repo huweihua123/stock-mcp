@@ -40,6 +40,11 @@ from src.server.mcp.registry import (
     get_tool_group_info,
     get_enabled_tool_count,
 )
+from src.server.mcp.capability_contract import (
+    get_capability_contract_overview,
+    install_capability_contract,
+    register_capability_tools,
+)
 from src.server.mcp.tools.artifact_utils import (
     create_artifact_envelope,
     create_artifact_response,
@@ -155,6 +160,9 @@ def create_mcp_server() -> FastMCP:
     # Register all tool groups via registry
     logger.info("📦 Registering tool groups...")
     register_tools(mcp)
+    contract_state: dict[str, Any] = {}
+    register_capability_tools(mcp, contract_state)
+    contract_state["catalog"] = install_capability_contract(mcp, strict=True)
 
     logger.info("✅ MCP server created with all tools")
 
@@ -203,14 +211,6 @@ def create_filtered_mcp_server(
     Returns:
         FastMCP: Filtered MCP server instance
     """
-    from src.server.mcp.tools.fundamental_tools import register_fundamental_tools
-    from src.server.mcp.tools.news_tools import register_news_tools
-    # from src.server.mcp.tools.research_tools import register_research_tools
-    from src.server.mcp.tools.asset_tools import register_asset_tools
-    from src.server.mcp.tools.technical_tools import register_technical_tools
-    from src.server.mcp.tools.filings_tools import register_filings_tools
-    from src.server.mcp.tools.trade_tools import register_trade_tools
-
     server_name = name or "stock-tool-mcp-filtered"
 
     mcp = FastMCP(
@@ -223,14 +223,11 @@ def create_filtered_mcp_server(
     settings = get_settings()
     _install_tool_guard(mcp, settings.timeout.mcp_tool_seconds)
 
-    # Register all tools - FastMCP will filter based on tags
-    register_fundamental_tools(mcp)
-    # register_news_tools(mcp)
-    # register_research_tools(mcp)
-    register_asset_tools(mcp)
-    register_technical_tools(mcp)
-    # register_filings_tools(mcp)
-    # register_trade_tools(mcp)
+    # Register all enabled groups, then filter by tags/capability tags.
+    register_tools(mcp)
+    contract_state: dict[str, Any] = {}
+    register_capability_tools(mcp, contract_state)
+    contract_state["catalog"] = install_capability_contract(mcp, strict=True)
 
     logger.info(f"✅ Filtered MCP server '{server_name}' created with tag filters")
     if include_tags:
@@ -239,6 +236,30 @@ def create_filtered_mcp_server(
         logger.info(f"   Exclude tags: {exclude_tags}")
 
     return mcp
+
+
+def create_capability_filtered_mcp_server(
+    include_capabilities: set[str] | None = None,
+    exclude_capabilities: set[str] | None = None,
+    name: str | None = None,
+) -> FastMCP:
+    """Create filtered server by capability ids (not tool names)."""
+    include_tags = (
+        {f"cap:{cap.strip()}" for cap in include_capabilities if cap.strip()}
+        if include_capabilities
+        else None
+    )
+    exclude_tags = (
+        {f"cap:{cap.strip()}" for cap in exclude_capabilities if cap.strip()}
+        if exclude_capabilities
+        else None
+    )
+    server_name = name or "stock-tool-mcp-capability-filtered"
+    return create_filtered_mcp_server(
+        include_tags=include_tags,
+        exclude_tags=exclude_tags,
+        name=server_name,
+    )
 
 
 def get_tools_by_tag(tag: str) -> list[str]:
@@ -253,6 +274,8 @@ def get_tools_by_tag(tag: str) -> list[str]:
     tools_by_tag = {
         "news": [],
         "research": [],
+        "contract": ["list_capabilities"],
+        "meta": ["list_capabilities"],
         "fundamental": [
             "get_financial_reports",
             "get_dividend_info",
@@ -312,11 +335,23 @@ def get_tools_by_tag(tag: str) -> list[str]:
 
 def get_server_info() -> dict:
     """Get MCP server information."""
+    tags = get_tool_group_info()
+    tags["contract"] = {
+        "count": 1,
+        "description": "能力契约目录与版本元数据",
+        "enabled": True,
+    }
+    tags["meta"] = {
+        "count": 1,
+        "description": "协议层元信息工具",
+        "enabled": True,
+    }
     return {
         "name": "Stock Tool MCP",
         "version": "1.0.0",
-        "total_tools": get_enabled_tool_count(),
-        "tags": get_tool_group_info(),
+        "total_tools": get_enabled_tool_count() + 1,
+        "capability_contract": get_capability_contract_overview(),
+        "tags": tags,
         "endpoint": "http://localhost:9898/",
     }
 
@@ -330,6 +365,8 @@ def get_all_tags() -> set[str]:
     return {
         "news",
         "research",
+        "contract",
+        "meta",
         "fundamental",
         "asset",
         "technical",
