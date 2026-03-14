@@ -261,7 +261,7 @@ def register_filings_tools(mcp: FastMCP):
                 
             result = {
                 "items": results,
-                "component_type": "table"
+                "component_type": "filings_list"
             }
             
             description = _summarize_filing_collection(
@@ -276,12 +276,12 @@ def register_filings_tools(mcp: FastMCP):
             )
             
             artifact = create_artifact_envelope(
-                component_type="table",
+                component_type="filings_list",
                 name=f"{ticker} SEC定期报告",
                 content=result,
                 description=description,
                 visible_to_llm=False,
-                display_in_report=True,
+                display_in_report=False,
             )
             return create_artifact_response(summary=description, artifact=artifact)
 
@@ -289,7 +289,7 @@ def register_filings_tools(mcp: FastMCP):
             if ctx:
                 await ctx.warning(f"⚠️ 符号解析失败: {ticker}", extra=e.to_dict())
             return create_symbol_error_response(
-                e, component_type="table", name=f"{ticker} SEC定期报告"
+                e, component_type="filings_list", name=f"{ticker} SEC定期报告"
             )
         except Exception as e:
             logger.error(f"Fetch periodic SEC filings failed: {e}")
@@ -375,7 +375,7 @@ def register_filings_tools(mcp: FastMCP):
                 
             result = {
                 "items": results,
-                "component_type": "table"
+                "component_type": "filings_list"
             }
             
             description = _summarize_filing_collection(
@@ -390,12 +390,12 @@ def register_filings_tools(mcp: FastMCP):
             )
             
             artifact = create_artifact_envelope(
-                component_type="table",
+                component_type="filings_list",
                 name=f"{ticker} SEC临时报告",
                 content=result,
                 description=description,
                 visible_to_llm=False,
-                display_in_report=True,
+                display_in_report=False,
             )
             return create_artifact_response(summary=description, artifact=artifact)
 
@@ -403,7 +403,7 @@ def register_filings_tools(mcp: FastMCP):
             if ctx:
                 await ctx.warning(f"⚠️ 符号解析失败: {ticker}", extra=e.to_dict())
             return create_symbol_error_response(
-                e, component_type="table", name=f"{ticker} SEC临时报告"
+                e, component_type="filings_list", name=f"{ticker} SEC临时报告"
             )
         except Exception as e:
             logger.error(f"Fetch event SEC filings failed: {e}")
@@ -485,7 +485,7 @@ def register_filings_tools(mcp: FastMCP):
                 
             result = {
                 "items": results,
-                "component_type": "table"
+                "component_type": "filings_list"
             }
             
             description = _summarize_filing_collection(
@@ -500,12 +500,12 @@ def register_filings_tools(mcp: FastMCP):
             )
             
             artifact = create_artifact_envelope(
-                component_type="table",
+                component_type="filings_list",
                 name=f"{symbol} A股公告",
                 content=result,
                 description=description,
                 visible_to_llm=False,
-                display_in_report=True,
+                display_in_report=False,
             )
             return create_artifact_response(summary=description, artifact=artifact)
 
@@ -513,7 +513,7 @@ def register_filings_tools(mcp: FastMCP):
             if ctx:
                 await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
             return create_symbol_error_response(
-                e, component_type="table", name=f"{symbol} A股公告"
+                e, component_type="filings_list", name=f"{symbol} A股公告"
             )
         except Exception as e:
             logger.error(f"Fetch A-share filings failed: {e}")
@@ -733,7 +733,7 @@ def register_filings_tools(mcp: FastMCP):
                 f" | 示例={' ; '.join(preview) if preview else 'N/A'}"
             )
             artifact = create_artifact_envelope(
-                component_type="table",
+                component_type="filing_key_metrics",
                 name=f"{ticker} Filing Key Metrics",
                 content={
                     "ticker": ticker,
@@ -748,7 +748,7 @@ def register_filings_tools(mcp: FastMCP):
             return create_artifact_response(summary=summary, artifact=artifact)
         except SymbolResolutionError as e:
             return create_symbol_error_response(
-                e, component_type="table", name=f"{ticker} Filing Key Metrics"
+                e, component_type="filing_key_metrics", name=f"{ticker} Filing Key Metrics"
             )
         except Exception as e:
             logger.error(f"Extract filing key metrics failed: {e}")
@@ -808,7 +808,7 @@ def register_filings_tools(mcp: FastMCP):
                 f" | sections={','.join([h for h in headings if h]) or 'N/A'}"
             )
             artifact = create_artifact_envelope(
-                component_type="table",
+                component_type="filing_section_facts",
                 name=f"{ticker} Filing Section Facts",
                 content={
                     "ticker": ticker,
@@ -823,7 +823,7 @@ def register_filings_tools(mcp: FastMCP):
             return create_artifact_response(summary=summary, artifact=artifact)
         except SymbolResolutionError as e:
             return create_symbol_error_response(
-                e, component_type="table", name=f"{ticker} Filing Section Facts"
+                e, component_type="filing_section_facts", name=f"{ticker} Filing Section Facts"
             )
         except Exception as e:
             logger.error(f"Extract filing section facts failed: {e}")
@@ -874,7 +874,7 @@ def register_filings_tools(mcp: FastMCP):
                 f" | first_ref={first_ref}"
             )
             artifact = create_artifact_envelope(
-                component_type="table",
+                component_type="filing_citations",
                 name=f"{ticker} Filing Citations",
                 content={
                     "ticker": ticker,
@@ -883,7 +883,7 @@ def register_filings_tools(mcp: FastMCP):
                 },
                 description=summary,
                 visible_to_llm=True,
-                display_in_report=False,
+                display_in_report=True,
             )
             if ctx:
                 await ctx.info(
@@ -893,7 +893,7 @@ def register_filings_tools(mcp: FastMCP):
             return create_artifact_response(summary=summary, artifact=artifact)
         except SymbolResolutionError as e:
             return create_symbol_error_response(
-                e, component_type="table", name=f"{ticker} Filing Citations"
+                e, component_type="filing_citations", name=f"{ticker} Filing Citations"
             )
         except Exception as e:
             logger.error(f"Build filing citations failed: {e}")
