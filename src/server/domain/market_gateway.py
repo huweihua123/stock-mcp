@@ -304,9 +304,11 @@ class MarketGateway:
 
         if item in _TICKER_METHODS:
             # Synthesise: resolve raw_symbol → ticker, then forward to adapter_manager
-            async def _ticker_method(raw_symbol: str, **kwargs):
+            async def _ticker_method(raw_symbol: str, *args, **kwargs):
                 ticker = await self.resolve_ticker(raw_symbol)
-                return await getattr(adapter_manager, item)(ticker, **kwargs)
+                # Backward compatibility:
+                # some legacy callers still pass positional args after raw_symbol.
+                return await getattr(adapter_manager, item)(ticker, *args, **kwargs)
 
             _ticker_method.__name__ = item
             _ticker_method.__qualname__ = f"MarketGateway.{item}"

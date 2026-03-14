@@ -5,6 +5,7 @@ Returns structured data (JSON).
 """
 
 import re
+from collections import Counter
 from typing import Any, Dict, List, Optional
 
 from fastmcp import FastMCP, Context
@@ -116,6 +117,72 @@ def _extract_section_facts(
     return sections
 
 
+def _first_non_empty(record: Dict[str, Any], keys: List[str]) -> str:
+    for key in keys:
+        val = str(record.get(key) or "").strip()
+        if val:
+            return val
+    return ""
+
+
+def _summarize_filing_collection(
+    subject: str,
+    label: str,
+    records: List[Dict[str, Any]],
+    *,
+    date_keys: List[str],
+    type_keys: List[str],
+    id_keys: List[str],
+    title_keys: List[str],
+    fallback_types: Optional[List[str]] = None,
+) -> str:
+    total = len(records)
+    date_vals = [
+        _first_non_empty(item, date_keys)
+        for item in records
+        if isinstance(item, dict)
+    ]
+    date_vals = [d for d in date_vals if d]
+    date_range = f"{min(date_vals)}~{max(date_vals)}" if date_vals else "日期未知"
+
+    type_vals = [
+        _first_non_empty(item, type_keys)
+        for item in records
+        if isinstance(item, dict)
+    ]
+    type_vals = [t for t in type_vals if t]
+    type_counter = Counter(type_vals)
+    if type_counter:
+        top_types = ",".join([f"{k}({v})" for k, v in type_counter.most_common(3)])
+    else:
+        defaults = [str(t).strip() for t in (fallback_types or []) if str(t).strip()]
+        top_types = ",".join(defaults[:3]) or "N/A"
+
+    latest = ""
+    if date_vals:
+        dated_records = []
+        for item in records:
+            if not isinstance(item, dict):
+                continue
+            item_date = _first_non_empty(item, date_keys)
+            if item_date:
+                dated_records.append((item_date, item))
+        if dated_records:
+            latest_item = sorted(dated_records, key=lambda x: x[0], reverse=True)[0][1]
+            latest_doc = _first_non_empty(latest_item, id_keys) or "N/A"
+            latest_title = _safe_excerpt(_first_non_empty(latest_item, title_keys), 80) or "N/A"
+            latest = f"latest_doc={latest_doc}, latest_title={latest_title}"
+
+    summary_parts = [
+        f"{subject} {label}: {total}份",
+        f"类型={top_types}",
+        f"区间={date_range}",
+    ]
+    if latest:
+        summary_parts.append(latest)
+    return " | ".join(summary_parts)
+
+
 def register_filings_tools(mcp: FastMCP):
     """Register filings tools."""
 
@@ -197,27 +264,15 @@ def register_filings_tools(mcp: FastMCP):
                 "component_type": "table"
             }
             
-            filing_dates = [
-                str(r.get("filing_date") or r.get("report_date") or "")
-                for r in results
-                if isinstance(r, dict)
-            ]
-            filing_dates = [d for d in filing_dates if d]
-            date_range = (
-                f"{min(filing_dates)}~{max(filing_dates)}" if filing_dates else "日期未知"
-            )
-            form_set = sorted(
-                {
-                    str(r.get("form") or "").strip()
-                    for r in results
-                    if isinstance(r, dict) and r.get("form")
-                }
-            )
-            fallback_forms = [str(f).strip() for f in (forms or []) if str(f).strip()]
-            forms_text = ",".join(form_set[:3]) if form_set else ",".join(fallback_forms[:3])
-            description = (
-                f"{ticker} SEC定期报告: {len(results)}份, "
-                f"表单={forms_text or 'N/A'}, 区间={date_range}"
+            description = _summarize_filing_collection(
+                ticker,
+                "SEC定期报告",
+                [r for r in results if isinstance(r, dict)],
+                date_keys=["filing_date", "report_date"],
+                type_keys=["form", "type"],
+                id_keys=["filing_id", "accession", "doc_id", "accession_number"],
+                title_keys=["title", "content_summary"],
+                fallback_types=forms,
             )
             
             artifact = create_artifact_envelope(
@@ -323,26 +378,15 @@ def register_filings_tools(mcp: FastMCP):
                 "component_type": "table"
             }
             
-            filing_dates = [
-                str(r.get("filing_date") or r.get("report_date") or "")
-                for r in results
-                if isinstance(r, dict)
-            ]
-            filing_dates = [d for d in filing_dates if d]
-            date_range = (
-                f"{min(filing_dates)}~{max(filing_dates)}" if filing_dates else "日期未知"
-            )
-            form_set = sorted(
-                {
-                    str(r.get("form") or "").strip()
-                    for r in results
-                    if isinstance(r, dict) and r.get("form")
-                }
-            )
-            forms_text = ",".join(form_set[:3]) if form_set else ",".join(forms or [])
-            description = (
-                f"{ticker} SEC临时报告: {len(results)}份, "
-                f"表单={forms_text or 'N/A'}, 区间={date_range}"
+            description = _summarize_filing_collection(
+                ticker,
+                "SEC临时报告",
+                [r for r in results if isinstance(r, dict)],
+                date_keys=["filing_date", "report_date"],
+                type_keys=["form", "type"],
+                id_keys=["filing_id", "accession", "doc_id", "accession_number"],
+                title_keys=["title", "content_summary"],
+                fallback_types=forms,
             )
             
             artifact = create_artifact_envelope(
@@ -444,31 +488,15 @@ def register_filings_tools(mcp: FastMCP):
                 "component_type": "table"
             }
             
-            filing_dates = [
-                str(r.get("ann_date") or r.get("pub_date") or r.get("end_date") or "")
-                for r in results
-                if isinstance(r, dict)
-            ]
-            filing_dates = [d for d in filing_dates if d]
-            date_range = (
-                f"{min(filing_dates)}~{max(filing_dates)}" if filing_dates else "日期未知"
-            )
-            type_set = sorted(
-                {
-                    str(
-                        r.get("filing_type")
-                        or r.get("report_type")
-                        or r.get("announcement_type")
-                        or ""
-                    ).strip()
-                    for r in results
-                    if isinstance(r, dict)
-                }
-            )
-            types_text = ",".join([t for t in type_set if t][:3]) or ",".join(filing_types or [])
-            description = (
-                f"{symbol} A股公告: {len(results)}份, 类型={types_text or 'N/A'}, "
-                f"区间={date_range}"
+            description = _summarize_filing_collection(
+                symbol,
+                "A股公告",
+                [r for r in results if isinstance(r, dict)],
+                date_keys=["ann_date", "pub_date", "filing_date", "end_date", "filingDate"],
+                type_keys=["filing_type", "report_type", "announcement_type", "type", "form"],
+                id_keys=["filing_id", "announcement_id", "doc_id", "secCode"],
+                title_keys=["title", "announcement_title", "content_summary"],
+                fallback_types=filing_types,
             )
             
             artifact = create_artifact_envelope(
@@ -608,9 +636,10 @@ def register_filings_tools(mcp: FastMCP):
                 return create_artifact_response(summary=summary, artifact=artifact)
 
             summary = (
-                f"{ticker} 文档Markdown获取完成: {doc_id}, "
-                f"cached={bool(result.get('cached')) if isinstance(result, dict) else False}, "
-                f"length={len(markdown)} chars"
+                f"{ticker} 文档Markdown获取完成: doc_id={doc_id}"
+                f" | cached={bool(result.get('cached')) if isinstance(result, dict) else False}"
+                f" | length={len(markdown)} chars"
+                f" | heading_count={markdown.count('#')}"
             )
             artifact = create_artifact_envelope(
                 component_type="filing_document",
@@ -691,9 +720,17 @@ def register_filings_tools(mcp: FastMCP):
                 else ""
             )
             items = _extract_metric_lines(markdown, hints, max_items=max_items)
+            preview = []
+            for item in items[:2]:
+                numbers = ",".join(item.get("numbers", [])[:3])
+                preview.append(
+                    f"L{item.get('line_no')}: {item.get('text')} [{numbers}]"
+                )
             summary = (
-                f"{ticker} 关键指标提取完成: {len(items)}条, "
-                f"doc_id={doc_id}, cached={bool(markdown_result.get('cached')) if isinstance(markdown_result, dict) else False}"
+                f"{ticker} 关键指标提取完成: {len(items)}条"
+                f" | doc_id={doc_id}"
+                f" | cached={bool(markdown_result.get('cached')) if isinstance(markdown_result, dict) else False}"
+                f" | 示例={' ; '.join(preview) if preview else 'N/A'}"
             )
             artifact = create_artifact_envelope(
                 component_type="table",
@@ -754,9 +791,21 @@ def register_filings_tools(mcp: FastMCP):
                 hints,
                 max_quotes_per_section=max_quotes,
             )
+            quote_count = sum(
+                len(sec.get("facts", []))
+                for sec in sections
+                if isinstance(sec, dict)
+            )
+            headings = [
+                str(sec.get("heading") or "").strip()
+                for sec in sections[:3]
+                if isinstance(sec, dict)
+            ]
             summary = (
-                f"{ticker} 章节事实提取完成: {len(sections)}个章节, "
-                f"doc_id={doc_id}"
+                f"{ticker} 章节事实提取完成: {len(sections)}个章节"
+                f" | quotes={quote_count}"
+                f" | doc_id={doc_id}"
+                f" | sections={','.join([h for h in headings if h]) or 'N/A'}"
             )
             artifact = create_artifact_envelope(
                 component_type="table",
@@ -818,7 +867,12 @@ def register_filings_tools(mcp: FastMCP):
                         "numbers": item.get("numbers", []),
                     }
                 )
-            summary = f"{ticker} 引用锚点构建完成: {len(citations)}条, doc_id={doc_id}"
+            first_ref = citations[0].get("ref_id") if citations else "N/A"
+            summary = (
+                f"{ticker} 引用锚点构建完成: {len(citations)}条"
+                f" | doc_id={doc_id}"
+                f" | first_ref={first_ref}"
+            )
             artifact = create_artifact_envelope(
                 component_type="table",
                 name=f"{ticker} Filing Citations",

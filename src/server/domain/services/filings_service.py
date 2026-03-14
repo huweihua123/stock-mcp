@@ -30,6 +30,89 @@ class FilingsService:
             return ticker.split(":", 1)[1]
         return ticker
 
+    @staticmethod
+    def _first_non_empty(record: Dict[str, Any], keys: List[str]) -> Any:
+        """Return first non-empty value from candidate keys."""
+        for key in keys:
+            value = record.get(key)
+            if value is None:
+                continue
+            if isinstance(value, str) and not value.strip():
+                continue
+            return value
+        return None
+
+    def _normalize_filing_record(
+        self,
+        ticker: str,
+        record: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Normalize heterogeneous adapter payload to stable filing schema.
+
+        Keep original keys while adding canonical fields used by LLM/tooling:
+        - doc_id/accession/accession_number
+        - filing_date/report_date
+        - form/type/filing_url/symbol
+        """
+        if not isinstance(record, dict):
+            return record
+        if "error" in record:
+            return record
+
+        accession = self._first_non_empty(
+            record,
+            [
+                "doc_id",
+                "accession",
+                "accession_number",
+                "accessionNumber",
+                "filing_id",
+            ],
+        )
+        filing_date = self._first_non_empty(
+            record,
+            ["filing_date", "filingDate", "filed_date", "filedDate", "ann_date", "pub_date"],
+        )
+        report_date = self._first_non_empty(
+            record,
+            ["report_date", "reportDate", "period_of_report", "periodOfReport"],
+        )
+        form = self._first_non_empty(record, ["form", "type", "filing_type"])
+        filing_url = self._first_non_empty(record, ["filing_url", "filingUrl", "url"])
+        description = self._first_non_empty(
+            record,
+            ["description", "title", "content_summary", "announcement_title"],
+        )
+        symbol = self._first_non_empty(record, ["symbol", "ticker", "secCode"]) or self._extract_symbol(
+            ticker
+        )
+
+        normalized = dict(record)
+        if accession is not None:
+            normalized.setdefault("doc_id", accession)
+            normalized.setdefault("accession", accession)
+            normalized.setdefault("accession_number", accession)
+            normalized.setdefault("accessionNumber", accession)
+        if filing_date is not None:
+            normalized.setdefault("filing_date", filing_date)
+            normalized.setdefault("filingDate", filing_date)
+        if report_date is not None:
+            normalized.setdefault("report_date", report_date)
+            normalized.setdefault("reportDate", report_date)
+        if form is not None:
+            normalized.setdefault("form", form)
+            normalized.setdefault("type", form)
+        if filing_url is not None:
+            normalized.setdefault("filing_url", filing_url)
+            normalized.setdefault("filingUrl", filing_url)
+            normalized.setdefault("url", filing_url)
+        if description is not None:
+            normalized.setdefault("description", description)
+        if symbol is not None:
+            normalized.setdefault("symbol", symbol)
+
+        return normalized
+
     async def fetch_periodic_sec_filings(
         self,
         ticker: str,
@@ -125,11 +208,25 @@ class FilingsService:
             )
             end = datetime.strptime(end_date_str, "%Y-%m-%d") if end_date_str else None
 
+            # NOTE:
+            # market_gateway synthesizes ticker-scoped methods as
+            #   fn(raw_symbol, *args, **kwargs)
+            # so pass ticker as first positional arg, and keep the rest as keywords.
             filings = await self.adapter_manager.get_filings(
-                ticker, start, end, limit, filing_types
+                ticker,
+                start_date=start,
+                end_date=end,
+                limit=limit,
+                filing_types=filing_types,
             )
-
-            return filings
+            if not isinstance(filings, list):
+                return []
+            return [
+                self._normalize_filing_record(ticker=ticker, record=item)
+                if isinstance(item, dict)
+                else item
+                for item in filings
+            ]
 
         except Exception as e:
             self.logger.error(f"Failed to fetch filings for {ticker}: {e}")
@@ -506,4 +603,3 @@ class FilingsService:
                 "doc_id": doc_id,
                 "ticker": ticker,
             }
-

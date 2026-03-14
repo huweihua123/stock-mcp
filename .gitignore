@@ -25,12 +25,12 @@ pip-wheel-metadata/
 __pypackages__/
 
 # Virtual environments
-venv/
-ENV/
-env/
-.venv/
-env.bak/
-venv.bak/
+# venv/
+# ENV/
+# env/
+# .venv/
+# env.bak/
+# venv.bak/
 
 # Installer logs
 pip-log.txt
