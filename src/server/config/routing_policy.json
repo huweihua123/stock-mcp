@@ -44,9 +44,69 @@
     },
     {
       "asset_type": "stock",
+      "data_type": "historical",
+      "exchange": "SSE",
+      "providers": ["tushare", "akshare", "baostock"]
+    },
+    {
+      "asset_type": "stock",
+      "data_type": "historical",
+      "exchange": "SZSE",
+      "providers": ["tushare", "akshare", "baostock"]
+    },
+    {
+      "asset_type": "stock",
+      "data_type": "historical",
+      "exchange": "BSE",
+      "providers": ["tushare", "akshare"]
+    },
+    {
+      "asset_type": "stock",
       "data_type": "realtime",
       "exchange": "HKEX",
       "providers": ["yahoo", "twelve_data"]
+    },
+    {
+      "asset_type": "stock",
+      "data_type": "realtime",
+      "exchange": "SSE",
+      "providers": ["tushare", "akshare", "baostock"]
+    },
+    {
+      "asset_type": "stock",
+      "data_type": "realtime",
+      "exchange": "SZSE",
+      "providers": ["tushare", "akshare", "baostock"]
+    },
+    {
+      "asset_type": "stock",
+      "data_type": "realtime",
+      "exchange": "BSE",
+      "providers": ["tushare", "akshare"]
+    },
+    {
+      "asset_type": "index",
+      "data_type": "historical",
+      "exchange": "SSE",
+      "providers": ["tushare", "baostock", "akshare"]
+    },
+    {
+      "asset_type": "index",
+      "data_type": "historical",
+      "exchange": "SZSE",
+      "providers": ["tushare", "baostock", "akshare"]
+    },
+    {
+      "asset_type": "index",
+      "data_type": "realtime",
+      "exchange": "SSE",
+      "providers": ["akshare", "tushare", "baostock"]
+    },
+    {
+      "asset_type": "index",
+      "data_type": "realtime",
+      "exchange": "SZSE",
+      "providers": ["akshare", "tushare", "baostock"]
     },
     {
       "asset_type": "fx",

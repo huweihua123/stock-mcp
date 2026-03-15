@@ -135,17 +135,20 @@ class SymbolResolver:
                     status=ResolutionStatus.INVALID,
                     reason="invalid_format",
                 )
-            exchange, symbol = self._autocorrect_a_share_exchange(
-                exchange, symbol, raw_symbol
-            )
+            asset_type_hint = self._infer_cn_equity_asset_type(exchange, symbol)
+            if asset_type_hint != "index":
+                exchange, symbol = self._autocorrect_a_share_exchange(
+                    exchange, symbol, raw_symbol
+                )
+                asset_type_hint = self._infer_cn_equity_asset_type(exchange, symbol)
             normalized = f"{exchange}:{symbol}"
             asset_id, resolved_type, canonical_id = await self._persist_resolution(
-                raw_symbol, normalized
+                raw_symbol, normalized, asset_type=asset_type_hint
             )
             instrument = self._build_instrument(
                 raw_symbol=raw_symbol,
                 normalized=normalized,
-                asset_type=resolved_type or "stock",
+                asset_type=resolved_type or asset_type_hint or "stock",
                 exchange=exchange,
                 base=None,
                 quote=None,
@@ -157,7 +160,7 @@ class SymbolResolver:
                 normalized=normalized,
                 status=ResolutionStatus.RESOLVED,
                 exchange=exchange,
-                asset_type=resolved_type,
+                asset_type=resolved_type or asset_type_hint,
                 asset_id=asset_id,
                 canonical_id=canonical_id,
                 instrument=instrument,
@@ -167,17 +170,20 @@ class SymbolResolver:
         suffix = self._resolve_suffix(raw)
         if suffix:
             exchange, symbol = suffix
-            exchange, symbol = self._autocorrect_a_share_exchange(
-                exchange, symbol, raw_symbol
-            )
+            asset_type_hint = self._infer_cn_equity_asset_type(exchange, symbol)
+            if asset_type_hint != "index":
+                exchange, symbol = self._autocorrect_a_share_exchange(
+                    exchange, symbol, raw_symbol
+                )
+                asset_type_hint = self._infer_cn_equity_asset_type(exchange, symbol)
             normalized = f"{exchange}:{symbol}"
             asset_id, resolved_type, canonical_id = await self._persist_resolution(
-                raw_symbol, normalized
+                raw_symbol, normalized, asset_type=asset_type_hint
             )
             instrument = self._build_instrument(
                 raw_symbol=raw_symbol,
                 normalized=normalized,
-                asset_type=resolved_type or "stock",
+                asset_type=resolved_type or asset_type_hint or "stock",
                 exchange=exchange,
                 base=None,
                 quote=None,
@@ -189,7 +195,7 @@ class SymbolResolver:
                 normalized=normalized,
                 status=ResolutionStatus.RESOLVED,
                 exchange=exchange,
-                asset_type=resolved_type,
+                asset_type=resolved_type or asset_type_hint,
                 asset_id=asset_id,
                 canonical_id=canonical_id,
                 instrument=instrument,
@@ -199,17 +205,20 @@ class SymbolResolver:
         numeric = self._resolve_numeric(raw)
         if numeric:
             exchange, symbol = numeric
-            exchange, symbol = self._autocorrect_a_share_exchange(
-                exchange, symbol, raw_symbol
-            )
+            asset_type_hint = self._infer_cn_equity_asset_type(exchange, symbol)
+            if asset_type_hint != "index":
+                exchange, symbol = self._autocorrect_a_share_exchange(
+                    exchange, symbol, raw_symbol
+                )
+                asset_type_hint = self._infer_cn_equity_asset_type(exchange, symbol)
             normalized = f"{exchange}:{symbol}"
             asset_id, resolved_type, canonical_id = await self._persist_resolution(
-                raw_symbol, normalized
+                raw_symbol, normalized, asset_type=asset_type_hint
             )
             instrument = self._build_instrument(
                 raw_symbol=raw_symbol,
                 normalized=normalized,
-                asset_type=resolved_type or "stock",
+                asset_type=resolved_type or asset_type_hint or "stock",
                 exchange=exchange,
                 base=None,
                 quote=None,
@@ -221,7 +230,7 @@ class SymbolResolver:
                 normalized=normalized,
                 status=ResolutionStatus.RESOLVED,
                 exchange=exchange,
-                asset_type=resolved_type,
+                asset_type=resolved_type or asset_type_hint,
                 asset_id=asset_id,
                 canonical_id=canonical_id,
                 instrument=instrument,
@@ -507,6 +516,9 @@ class SymbolResolver:
         if not raw.isdigit():
             return None
         if len(raw) == 6:
+            # Common broad-market indices (CSI/SSE) to avoid misrouting to SZSE stocks.
+            if raw in {"000001", "000016", "000300", "000688", "000852", "000905"}:
+                return "SSE", raw
             if raw.startswith("6"):
                 return "SSE", raw
             if raw.startswith("0") or raw.startswith("3"):
@@ -516,6 +528,28 @@ class SymbolResolver:
         if len(raw) == 5:
             return "HKEX", raw
         return None
+
+    def _infer_cn_equity_asset_type(
+        self, exchange: Optional[str], symbol: Optional[str]
+    ) -> Optional[str]:
+        """Infer CN equity asset type from code pattern for routing hints."""
+        if not exchange or not symbol:
+            return None
+        ex = exchange.upper()
+        sym = symbol.upper()
+        if ex not in {"SSE", "SZSE", "BSE"}:
+            return None
+        if not sym.isdigit() or len(sym) != 6:
+            return None
+        if ex == "SSE":
+            if sym.startswith("000") or sym.startswith(("880", "881", "882", "883")):
+                return "index"
+            return "stock"
+        if ex == "SZSE":
+            if sym.startswith("399"):
+                return "index"
+            return "stock"
+        return "stock"
 
     def _resolve_crypto(
         self, raw: str

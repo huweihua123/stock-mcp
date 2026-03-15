@@ -101,6 +101,23 @@ class TushareAdapter(BaseDataAdapter):
         """Convert internal ticker to Tushare format."""
         return self.convert_to_source_ticker(ticker)
 
+    @staticmethod
+    def _is_index_ts_code(ts_code: str) -> bool:
+        """Best-effort detection for CN index ts_code."""
+        if "." not in ts_code:
+            return False
+        symbol, suffix = ts_code.split(".", 1)
+        suffix = suffix.upper()
+        if not symbol.isdigit() or len(symbol) != 6:
+            return False
+        if suffix == "SH":
+            return symbol.startswith("000") or symbol.startswith(
+                ("880", "881", "882", "883")
+            )
+        if suffix == "SZ":
+            return symbol.startswith("399")
+        return False
+
     async def get_asset_info(self, ticker: str) -> Optional[Asset]:
         """Get asset information."""
         client = self.tushare_conn.get_client()
@@ -242,8 +259,9 @@ class TushareAdapter(BaseDataAdapter):
         ts_code = self._to_ts_code(ticker)
 
         try:
+            fetch_api = client.index_daily if self._is_index_ts_code(ts_code) else client.daily
             df = await self._run(
-                client.daily,
+                fetch_api,
                 ts_code=ts_code,
                 start_date=start_date.strftime("%Y%m%d"),
                 end_date=end_date.strftime("%Y%m%d"),
