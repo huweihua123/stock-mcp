@@ -3,11 +3,43 @@
 Provides ChunkedDocument-based chunking with item labels for SEC filings.
 """
 
+import re
 from typing import Any, Dict, List, Optional
 
 from fastmcp import FastMCP, Context
 
 from src.server.utils.logger import logger
+
+_A_SHARE_PATTERN = re.compile(r"^(?:\d{6}|(?:SH|SZ)\d{6}|\d{6}\.(?:SH|SZ))$", re.IGNORECASE)
+_US_SYMBOL_PATTERN = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
+_CN_PREFIXES = ("SSE:", "SZSE:", "SH:", "SZ:")
+_US_PREFIXES = ("NASDAQ:", "NYSE:", "AMEX:", "OTC:")
+
+
+def _looks_a_share_symbol(symbol: str | None) -> bool:
+    token = str(symbol or "").strip().upper()
+    if not token:
+        return False
+    if token.startswith(_CN_PREFIXES):
+        return True
+    if token.endswith((".SH", ".SZ")):
+        return True
+    if _A_SHARE_PATTERN.match(token):
+        return True
+    if ":" in token:
+        token = token.split(":", 1)[1]
+    return token.isdigit() and len(token) == 6
+
+
+def _is_us_symbol(symbol: str | None) -> bool:
+    token = str(symbol or "").strip().upper()
+    if not token:
+        return False
+    if _looks_a_share_symbol(token):
+        return False
+    if ":" in token:
+        return token.startswith(_US_PREFIXES)
+    return bool(_US_SYMBOL_PATTERN.match(token))
 
 
 def _chunk_to_text(chunk_obj) -> str:
@@ -47,7 +79,7 @@ def register_chunking_tools(mcp: FastMCP):
     async def get_document_chunks(
         ticker: str,
         doc_id: str,
-        items: list[str] = None,
+        items: list[str] | None = None,
         ctx: Context = None
     ) -> Dict[str, Any]:
         """Get semantic chunks from SEC filing with item labels.
@@ -110,6 +142,28 @@ def register_chunking_tools(mcp: FastMCP):
                 f"🔧 获取文档分块: {ticker} {doc_id}",
                 extra={"ticker": ticker, "doc_id": doc_id, "items": items}
             )
+
+        if _looks_a_share_symbol(ticker) or not _is_us_symbol(ticker):
+            return {
+                "error": {
+                    "code": "INVALID_ROUTE",
+                    "message": "get_document_chunks is US SEC-only and does not accept A-share/non-US ticker.",
+                    "details": {"ticker": ticker, "doc_id": doc_id, "items": items},
+                },
+                "summary": "get_document_chunks only supports US SEC filings.",
+                "suggested_reroute": "Use A-share announcement/news capabilities for CN filings.",
+            }
+
+        if "cninfo" in str(doc_id or "").lower():
+            return {
+                "error": {
+                    "code": "INVALID_ROUTE",
+                    "message": "get_document_chunks does not accept cninfo document identifiers.",
+                    "details": {"ticker": ticker, "doc_id": doc_id},
+                },
+                "summary": "get_document_chunks only supports SEC accession documents.",
+                "suggested_reroute": "Use A-share announcement/news capabilities for CN filings.",
+            }
         try:
             from src.server.utils.sec_utils import get_company
             
@@ -134,10 +188,12 @@ def register_chunking_tools(mcp: FastMCP):
             
             if not target_filing:
                 return {
-                    "status": "error",
-                    "error": f"Filing not found: {accession_number} for {pure_symbol}",
-                    "doc_id": doc_id,
-                    "ticker": ticker,
+                    "result_status": "no_data",
+                    "summary": f"No filing found for {pure_symbol} accession={accession_number}",
+                    "no_data_reason": f"Filing not found: {accession_number} for {pure_symbol}",
+                    "scope": {"ticker": ticker, "doc_id": doc_id},
+                    "retriable": False,
+                    "suggested_reroute": "Adjust accession/time range or fetch filing list first.",
                 }
             
             logger.info(f"📄 Found filing: {target_filing.form} dated {target_filing.filing_date}")
@@ -244,7 +300,7 @@ def register_chunking_tools(mcp: FastMCP):
                 )
 
             return {
-                "status": "success",
+                "result_status": "ok",
                 "doc_id": accession_number,
                 "ticker": pure_symbol,
                 "form": target_filing.form,
@@ -263,10 +319,11 @@ def register_chunking_tools(mcp: FastMCP):
                     extra={"error": str(e)}
                 )
             return {
-                "status": "error",
-                "error": str(e),
-                "doc_id": doc_id,
-                "ticker": ticker,
+                "error": {
+                    "code": "INTERNAL_ERROR",
+                    "message": str(e),
+                    "details": {"ticker": ticker, "doc_id": doc_id},
+                }
             }
 
 
@@ -276,10 +333,12 @@ async def _fallback_markdown_chunking(filing, ticker: str, doc_id: str, ctx: Con
         markdown_content = filing.markdown()
         if not markdown_content:
             return {
-                "status": "error",
-                "error": "Empty markdown content",
-                "doc_id": doc_id,
-                "ticker": ticker,
+                "result_status": "no_data",
+                "summary": "Fallback markdown content is empty",
+                "no_data_reason": "Empty markdown content",
+                "scope": {"ticker": ticker, "doc_id": doc_id},
+                "retriable": False,
+                "suggested_reroute": "Try another filing or retrieve markdown content first.",
             }
         
         # Simple paragraph-based chunking
@@ -327,7 +386,7 @@ async def _fallback_markdown_chunking(filing, ticker: str, doc_id: str, ctx: Con
         logger.info(f"📝 Fallback chunking: {len(chunks)} chunks")
         
         return {
-            "status": "success",
+            "result_status": "ok",
             "doc_id": doc_id,
             "ticker": ticker,
             "form": filing.form,
@@ -340,8 +399,9 @@ async def _fallback_markdown_chunking(filing, ticker: str, doc_id: str, ctx: Con
     except Exception as e:
         logger.error(f"Fallback chunking failed: {e}")
         return {
-            "status": "error",
-            "error": str(e),
-            "doc_id": doc_id,
-            "ticker": ticker,
+            "error": {
+                "code": "INTERNAL_ERROR",
+                "message": str(e),
+                "details": {"ticker": ticker, "doc_id": doc_id},
+            }
         }

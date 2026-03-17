@@ -71,7 +71,7 @@ TOOL_GROUPS: List[ToolGroup] = [
         register=register_filings_tools,
         enabled=True,
         description="公告文件",
-        count=8,
+        count=7,
     ),
     ToolGroup(
         name="trade",

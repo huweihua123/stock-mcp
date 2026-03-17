@@ -296,7 +296,6 @@ def get_tools_by_tag(tag: str) -> list[str]:
         "filings": [
             "fetch_periodic_sec_filings",
             "fetch_event_sec_filings",
-            "fetch_ashare_filings",
             "process_document",
         ],
         "trade": ["execute_order", "get_account_balance"],

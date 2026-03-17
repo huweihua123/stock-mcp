@@ -51,12 +51,6 @@
       "input_schema": "filings.document.facts.extract.input.v1",
       "output_schema": "filings.document.facts.extract.output.v1"
     },
-    "fetch_ashare_filings": {
-      "capability_id": "filings.cn.fetch",
-      "capability_version": "1.0.0",
-      "input_schema": "filings.cn.fetch.input.v1",
-      "output_schema": "filings.cn.fetch.output.v1"
-    },
     "fetch_event_sec_filings": {
       "capability_id": "filings.sec.event.fetch",
       "capability_version": "1.0.0",

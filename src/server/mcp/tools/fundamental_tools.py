@@ -342,7 +342,12 @@ def register_fundamental_tools(mcp: FastMCP):
     ) -> Dict[str, Any]:
         """Get main business composition for the given ticker."""
         if not symbol and not ts_code:
-            return {"error": "symbol or ts_code is required"}
+            return {
+                "error": {
+                    "code": "INVALID_ARGUMENT",
+                    "message": "symbol or ts_code is required",
+                }
+            }
 
         raw_symbol = ts_code or symbol
         if ctx:
@@ -355,7 +360,81 @@ def register_fundamental_tools(mcp: FastMCP):
 
             data = await fundamental_use_cases.get_mainbz_info(raw_symbol)
             rows = data.get("rows", [])
+            if not isinstance(rows, list):
+                rows = []
+            rows = [r for r in rows if isinstance(r, dict)]
             ts_code = data.get("ts_code") or await _resolve_ts_code(raw_symbol)
+            upstream_status = str(data.get("status") or "").strip().lower()
+            coverage = data.get("coverage") if isinstance(data, dict) else {}
+
+            if not rows:
+                no_data_reason = (
+                    str(data.get("no_data_reason") or "").strip()
+                    or "tushare.fina_mainbz returned empty rows"
+                )
+                summary_text = (
+                    f"{ts_code} 主营构成暂无数据 (NO_DATA): {no_data_reason}. "
+                    "建议补证：改用财务/股东结构化工具，并用公告或网页检索补主营结构叙事。"
+                )
+                empty_artifact = create_artifact_envelope(
+                    component_type="table",
+                    name=f"Main Business Composition (No Data): {ts_code}",
+                    content={
+                        "ts_code": ts_code,
+                        "status": "no_data",
+                        "reason": no_data_reason,
+                        "source": "fina_mainbz",
+                        "rows": [],
+                        "coverage": coverage
+                        if isinstance(coverage, dict)
+                        else {
+                            "row_count": 0,
+                            "dimensions_found": [],
+                            "expected_dimensions": ["P", "D", "I"],
+                            "latest_period": None,
+                        },
+                        "source_type_required_next": [
+                            "structured_financial",
+                            "filings_or_web_news",
+                        ],
+                    },
+                    description=summary_text,
+                    metadata={
+                        "type": "main_business",
+                        "ts_code": ts_code,
+                        "source": "fina_mainbz",
+                        "result_status": "no_data",
+                        "upstream_status": upstream_status or "unknown",
+                    },
+                    visible_to_llm=True,
+                    display_in_report=True,
+                )
+                response: Dict[str, Any] = {
+                    **create_artifact_response(summary=summary_text, artifact=empty_artifact)
+                }
+                response["result_status"] = "no_data"
+                response["no_data_reason"] = no_data_reason
+                response["scope"] = {
+                    "tool": "get_mainbz_info",
+                    "ts_code": ts_code,
+                    "source": "fina_mainbz",
+                    "reason": no_data_reason,
+                }
+                response["retriable"] = False
+                response["next_recommended_tools"] = [
+                    "get_financial_reports",
+                    "get_shareholder_info",
+                    "get_dividend_info",
+                ]
+                response["reroute_if_blocked"] = (
+                    "If main business mix is required, route to filings/web search evidence."
+                )
+                if ctx:
+                    await ctx.warning(
+                        f"⚠️ 主营业务构成无数据: {ts_code}",
+                        extra={"reason": no_data_reason},
+                    )
+                return response
 
             type_map = {
                 "P": ("分产品", "产品"),

@@ -22,11 +22,69 @@ from src.server.domain.symbols.errors import SymbolResolutionError
 
 
 _NUMBER_PATTERN = re.compile(r"\b\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:%|x|倍|亿美元|亿元|万元)?\b")
+_A_SHARE_PATTERN = re.compile(r"^(?:\d{6}|(?:SH|SZ)\d{6}|\d{6}\.(?:SH|SZ))$", re.IGNORECASE)
+_US_SYMBOL_PATTERN = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
+_CN_PREFIXES = ("SSE:", "SZSE:", "SH:", "SZ:")
+_US_PREFIXES = ("NASDAQ:", "NYSE:", "AMEX:", "OTC:")
 
 
 def _safe_excerpt(text: str, limit: int = 240) -> str:
     val = (text or "").strip()
     return val if len(val) <= limit else (val[: limit - 3] + "...")
+
+
+def _looks_a_share_symbol(symbol: str | None) -> bool:
+    token = str(symbol or "").strip().upper()
+    if not token:
+        return False
+    if token.startswith(_CN_PREFIXES):
+        return True
+    if token.endswith((".SH", ".SZ")):
+        return True
+    if _A_SHARE_PATTERN.match(token):
+        return True
+    if ":" in token:
+        token = token.split(":", 1)[1]
+    return token.isdigit() and len(token) == 6
+
+
+def _is_us_symbol(symbol: str | None) -> bool:
+    token = str(symbol or "").strip().upper()
+    if not token:
+        return False
+    if _looks_a_share_symbol(token):
+        return False
+    if ":" in token:
+        return token.startswith(_US_PREFIXES)
+    return bool(_US_SYMBOL_PATTERN.match(token))
+
+
+def _invalid_route_error(
+    message: str,
+    *,
+    details: Dict[str, Any],
+    suggested_reroute: str,
+) -> Dict[str, Any]:
+    return {
+        "error": {
+            "code": "INVALID_ROUTE",
+            "message": message,
+            "details": details,
+        },
+        "summary": message,
+        "suggested_reroute": suggested_reroute,
+    }
+
+
+def _no_data_result(reason: str, *, details: Dict[str, Any], suggested_reroute: str) -> Dict[str, Any]:
+    return {
+        "result_status": "no_data",
+        "summary": reason,
+        "no_data_reason": reason,
+        "scope": details,
+        "retriable": False,
+        "suggested_reroute": suggested_reroute,
+    }
 
 
 def _extract_metric_lines(
@@ -189,9 +247,9 @@ def register_filings_tools(mcp: FastMCP):
     @mcp.tool(tags={"filings"})
     async def fetch_periodic_sec_filings(
         ticker: str,
-        forms: list[str] = None,
-        year: int = None,
-        quarter: int = None,
+        forms: list[str] | None = None,
+        year: int | None = None,
+        quarter: int | None = None,
         limit: int = 10,
         ctx: Context = None
     ) -> Dict[str, Any]:
@@ -235,6 +293,13 @@ def register_filings_tools(mcp: FastMCP):
                 extra={"ticker": ticker, "forms": forms, "year": year, "quarter": quarter}
             )
 
+        if _looks_a_share_symbol(ticker) or not _is_us_symbol(ticker):
+            return _invalid_route_error(
+                "fetch_periodic_sec_filings is US-only and does not accept A-share/non-US symbols.",
+                details={"ticker": ticker, "forms": forms, "year": year, "quarter": quarter},
+                suggested_reroute="Use A-share announcement/news capability for CN filings.",
+            )
+
         try:
             logger.info(
                 "MCP tool called: fetch_periodic_sec_filings",
@@ -253,21 +318,29 @@ def register_filings_tools(mcp: FastMCP):
                 limit=limit,
             )
             
+            valid_records = [r for r in results if isinstance(r, dict) and not r.get("error")]
+            if not valid_records:
+                return _no_data_result(
+                    f"No SEC periodic filings found for {ticker} in current query scope.",
+                    details={"ticker": ticker, "forms": forms, "year": year, "quarter": quarter, "limit": limit},
+                    suggested_reroute="Broaden year/quarter/forms or call event filings as supplement.",
+                )
+
             if ctx:
                 await ctx.info(
                     f"✅ SEC定期报告获取完成: {ticker}",
-                    extra={"count": len(results)}
+                    extra={"count": len(valid_records)}
                 )
                 
             result = {
-                "items": results,
+                "items": valid_records,
                 "component_type": "filings_list"
             }
             
             description = _summarize_filing_collection(
                 ticker,
                 "SEC定期报告",
-                [r for r in results if isinstance(r, dict)],
+                valid_records,
                 date_keys=["filing_date", "report_date"],
                 type_keys=["form", "type"],
                 id_keys=["filing_id", "accession", "doc_id", "accession_number"],
@@ -298,14 +371,14 @@ def register_filings_tools(mcp: FastMCP):
                     f"❌ 获取SEC定期报告失败: {ticker}",
                     extra={"error": str(e)}
                 )
-            return [{"error": str(e)}]
+            return {"error": {"code": "INTERNAL_ERROR", "message": str(e)}}
 
     @mcp.tool(tags={"filings"})
     async def fetch_event_sec_filings(
         ticker: str,
-        forms: list[str] = None,
-        start_date: str = None,
-        end_date: str = None,
+        forms: list[str] | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
         limit: int = 10,
         ctx: Context = None
     ) -> Dict[str, Any]:
@@ -349,6 +422,13 @@ def register_filings_tools(mcp: FastMCP):
                 extra={"ticker": ticker, "forms": forms}
             )
 
+        if _looks_a_share_symbol(ticker) or not _is_us_symbol(ticker):
+            return _invalid_route_error(
+                "fetch_event_sec_filings is US-only and does not accept A-share/non-US symbols.",
+                details={"ticker": ticker, "forms": forms, "start_date": start_date, "end_date": end_date},
+                suggested_reroute="Use A-share announcement/news capability for CN filings.",
+            )
+
         try:
             logger.info(
                 "MCP tool called: fetch_event_sec_filings",
@@ -367,21 +447,29 @@ def register_filings_tools(mcp: FastMCP):
                 limit=limit,
             )
             
+            valid_records = [r for r in results if isinstance(r, dict) and not r.get("error")]
+            if not valid_records:
+                return _no_data_result(
+                    f"No SEC event filings found for {ticker} in current query scope.",
+                    details={"ticker": ticker, "forms": forms, "start_date": start_date, "end_date": end_date, "limit": limit},
+                    suggested_reroute="Broaden date range/forms or fetch periodic filings as supplement.",
+                )
+
             if ctx:
                 await ctx.info(
                     f"✅ SEC临时报告获取完成: {ticker}",
-                    extra={"count": len(results)}
+                    extra={"count": len(valid_records)}
                 )
                 
             result = {
-                "items": results,
+                "items": valid_records,
                 "component_type": "filings_list"
             }
             
             description = _summarize_filing_collection(
                 ticker,
                 "SEC临时报告",
-                [r for r in results if isinstance(r, dict)],
+                valid_records,
                 date_keys=["filing_date", "report_date"],
                 type_keys=["form", "type"],
                 id_keys=["filing_id", "accession", "doc_id", "accession_number"],
@@ -412,124 +500,48 @@ def register_filings_tools(mcp: FastMCP):
                     f"❌ 获取SEC临时报告失败: {ticker}",
                     extra={"error": str(e)}
                 )
-            return [{"error": str(e)}]
+            return {"error": {"code": "INTERNAL_ERROR", "message": str(e)}}
 
-    @mcp.tool(tags={"filings"})
     async def fetch_ashare_filings(
         symbol: str,
-        filing_types: list[str] = None,
-        start_date: str = None,
-        end_date: str = None,
+        filing_types: list[str] | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
         limit: int = 10,
         ctx: Context = None
     ) -> Dict[str, Any]:
-        """Get A-share announcements from CNINFO.
-
-        Args:
-            symbol: A-share ticker in format EXCHANGE:CODE
-                Examples:
-                - SSE:600519 (Kweichow Moutai, Shanghai Stock Exchange)
-                - SZSE:000001 (Ping An Bank, Shenzhen Stock Exchange)
-                - SZSE:300750 (CATL, ChiNext)
-                Note: Plain codes like "600519" are also accepted
-            filing_types: Report types in ENGLISH ONLY. Supported values:
-                - "annual": Annual reports (年报)
-                - "semi-annual": Semi-annual reports (半年报/中报)
-                - "quarterly": Quarterly reports (季报)
-                Example: ["annual", "quarterly"]
-                IMPORTANT: Chinese terms like "年报/半年报/季报" are NOT supported
-            start_date: Start date in YYYY-MM-DD format (optional)
-            end_date: End date in YYYY-MM-DD format (optional)
-            limit: Maximum number of results (default: 10)
-            ctx: FastMCP Context for logging
-
-        Returns:
-            List of filing dictionaries with metadata and PDF URLs
-
-        Examples:
-            - Get 2024 annual report:
-              symbol="SSE:600519", filing_types=["annual"],
-              start_date="2024-01-01", end_date="2024-12-31"
-            - Get latest quarterly reports:
-              symbol="SZSE:300750", filing_types=["quarterly"], limit=5
-            - Get all types:
-              symbol="SSE:600519", filing_types=None
-        """
+        """Deprecated route: filings capability is now US-only."""
         if ctx:
             await ctx.info(
                 f"🔧 获取A股公告: {symbol}",
                 extra={"symbol": symbol, "types": filing_types}
             )
-
-        try:
-            logger.info(
-                "MCP tool called: fetch_ashare_filings",
-                symbol=symbol,
-                types=filing_types,
-                limit=limit,
-            )
-
-            results = await filings_use_cases.fetch_ashare_filings(
-                symbol=symbol,
-                filing_types=filing_types,
-                start_date=start_date,
-                end_date=end_date,
-                limit=limit,
-            )
-            
-            if ctx:
-                await ctx.info(
-                    f"✅ A股公告获取完成: {symbol}",
-                    extra={"count": len(results)}
-                )
-                
-            result = {
-                "items": results,
-                "component_type": "filings_list"
-            }
-            
-            description = _summarize_filing_collection(
-                symbol,
-                "A股公告",
-                [r for r in results if isinstance(r, dict)],
-                date_keys=["ann_date", "pub_date", "filing_date", "end_date", "filingDate"],
-                type_keys=["filing_type", "report_type", "announcement_type", "type", "form"],
-                id_keys=["filing_id", "announcement_id", "doc_id", "secCode"],
-                title_keys=["title", "announcement_title", "content_summary"],
-                fallback_types=filing_types,
-            )
-            
-            artifact = create_artifact_envelope(
-                component_type="filings_list",
-                name=f"{symbol} A股公告",
-                content=result,
-                description=description,
-                visible_to_llm=False,
-                display_in_report=False,
-            )
-            return create_artifact_response(summary=description, artifact=artifact)
-
-        except SymbolResolutionError as e:
-            if ctx:
-                await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
-            return create_symbol_error_response(
-                e, component_type="filings_list", name=f"{symbol} A股公告"
-            )
-        except Exception as e:
-            logger.error(f"Fetch A-share filings failed: {e}")
-            if ctx:
-                await ctx.error(
-                    f"❌ 获取A股公告失败: {symbol}",
-                    extra={"error": str(e)}
-                )
-            return [{"error": str(e)}]
+        logger.warning(
+            "fetch_ashare_filings called after US-only switch",
+            symbol=symbol,
+            filing_types=filing_types,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+        return _invalid_route_error(
+            "fetch_ashare_filings is disabled: filings capability is US-only in current runtime.",
+            details={
+                "symbol": symbol,
+                "filing_types": filing_types,
+                "start_date": start_date,
+                "end_date": end_date,
+                "limit": limit,
+            },
+            suggested_reroute="Use A-share structured/news capabilities instead of SEC filings route.",
+        )
 
     @mcp.tool(tags={"filings"})
     async def process_document(
         doc_id: str,
         url: str,
         doc_type: str = "unknown",
-        ticker: str = None,
+        ticker: str | None = None,
         ctx: Context = None
     ) -> Dict[str, Any]:
         """Process a single document by URL (Download & Extract Text).
@@ -556,6 +568,19 @@ def register_filings_tools(mcp: FastMCP):
                 extra={"url": url, "doc_type": doc_type, "ticker": ticker}
             )
 
+        if ticker and _looks_a_share_symbol(ticker):
+            return _invalid_route_error(
+                "process_document is US SEC-only and does not accept A-share ticker.",
+                details={"ticker": ticker, "doc_id": doc_id, "url": url, "doc_type": doc_type},
+                suggested_reroute="Use A-share announcement/news capabilities for CN filings.",
+            )
+        if "cninfo" in str(url or "").lower():
+            return _invalid_route_error(
+                "process_document is US SEC-only and does not accept cninfo source.",
+                details={"ticker": ticker, "doc_id": doc_id, "url": url, "doc_type": doc_type},
+                suggested_reroute="Use A-share announcement/news capabilities for CN filings.",
+            )
+
         try:
             logger.info(
                 "MCP tool called: process_document",
@@ -571,6 +596,11 @@ def register_filings_tools(mcp: FastMCP):
                 doc_type=doc_type,
                 ticker=ticker,
             )
+
+            if isinstance(result, dict):
+                status = str(result.get("result_status") or "").strip().lower()
+                if status in {"error", "no_data"}:
+                    return result
             
             if ctx:
                 await ctx.info(f"✅ 文档处理完成: {doc_id}")
@@ -590,7 +620,7 @@ def register_filings_tools(mcp: FastMCP):
                     f"❌ 文档处理失败: {doc_id}",
                     extra={"error": str(e)}
                 )
-            return {"error": str(e)}
+            return {"error": {"code": "INTERNAL_ERROR", "message": str(e)}}
 
     @mcp.tool(tags={"filings"})
     async def get_filing_markdown(
@@ -599,6 +629,13 @@ def register_filings_tools(mcp: FastMCP):
         ctx: Context = None,
     ) -> Dict[str, Any]:
         """Get SEC filing markdown content by ticker + accession number."""
+        if _looks_a_share_symbol(ticker):
+            return _invalid_route_error(
+                "get_filing_markdown is US SEC-only and does not accept A-share ticker.",
+                details={"ticker": ticker, "doc_id": doc_id},
+                suggested_reroute="Use A-share announcement/news capabilities for CN filings.",
+            )
+
         if ctx:
             await ctx.info(
                 f"🔧 获取SEC文档Markdown: {ticker} {doc_id}",
@@ -619,11 +656,14 @@ def register_filings_tools(mcp: FastMCP):
             markdown = ""
             if isinstance(result, dict):
                 markdown = str(result.get("content") or "")
+                result_status = str(result.get("result_status") or "").strip().lower()
+            else:
+                result_status = ""
 
-            if isinstance(result, dict) and result.get("status") == "error":
+            if result_status == "error":
                 summary = (
                     f"{ticker} 文档Markdown获取失败: "
-                    f"{result.get('error') or 'unknown error'}"
+                    f"{(result.get('error') or {}).get('message') if isinstance(result.get('error'), dict) else (result.get('error') or 'unknown error')}"
                 )
                 artifact = create_artifact_envelope(
                     component_type="filing_document",
@@ -633,7 +673,34 @@ def register_filings_tools(mcp: FastMCP):
                     visible_to_llm=True,
                     display_in_report=False,
                 )
-                return create_artifact_response(summary=summary, artifact=artifact)
+                response = dict(create_artifact_response(summary=summary, artifact=artifact))
+                response["error"] = result.get("error") if isinstance(result, dict) else {"code": "INTERNAL_ERROR", "message": "unknown error"}
+                return response
+
+            if result_status == "no_data" or not markdown.strip():
+                reason = (
+                    str(result.get("no_data_reason") or "").strip()
+                    if isinstance(result, dict)
+                    else ""
+                ) or "filing markdown is empty"
+                summary = f"{ticker} 文档Markdown无数据: {reason}"
+                artifact = create_artifact_envelope(
+                    component_type="filing_document",
+                    name=f"{ticker} SEC文档Markdown(No Data)",
+                    content=result if isinstance(result, dict) else {"reason": reason},
+                    description=summary,
+                    visible_to_llm=True,
+                    display_in_report=False,
+                )
+                response = dict(create_artifact_response(summary=summary, artifact=artifact))
+                response["result_status"] = "no_data"
+                response["no_data_reason"] = reason
+                response["suggested_reroute"] = (
+                    result.get("suggested_reroute")
+                    if isinstance(result, dict)
+                    else "Adjust doc_id/time window or fetch filing list first."
+                )
+                return response
 
             summary = (
                 f"{ticker} 文档Markdown获取完成: doc_id={doc_id}"
@@ -675,17 +742,24 @@ def register_filings_tools(mcp: FastMCP):
                     f"❌ 获取SEC文档Markdown失败: {ticker}",
                     extra={"error": str(e)},
                 )
-            return {"error": str(e)}
+            return {"error": {"code": "INTERNAL_ERROR", "message": str(e)}}
 
     @mcp.tool(tags={"filings"})
     async def extract_filing_key_metrics(
         ticker: str,
         doc_id: str,
-        metric_hints: list[str] = None,
+        metric_hints: list[str] | None = None,
         max_items: int = 30,
         ctx: Context = None,
     ) -> Dict[str, Any]:
         """Extract metric-like lines from filing markdown for quick evidence pickup."""
+        if _looks_a_share_symbol(ticker):
+            return _invalid_route_error(
+                "extract_filing_key_metrics is US SEC-only and does not accept A-share ticker.",
+                details={"ticker": ticker, "doc_id": doc_id},
+                suggested_reroute="Use A-share announcement/news capabilities for CN filings.",
+            )
+
         default_hints = [
             "revenue",
             "net income",
@@ -714,11 +788,24 @@ def register_filings_tools(mcp: FastMCP):
                 ticker=ticker,
                 doc_id=doc_id,
             )
+            status = str(markdown_result.get("result_status") or "").strip().lower()
+            if status == "error":
+                return {
+                    "error": markdown_result.get("error")
+                    if isinstance(markdown_result.get("error"), dict)
+                    else {"code": "INTERNAL_ERROR", "message": str(markdown_result.get("error") or "unknown error")}
+                }
             markdown = (
                 str(markdown_result.get("content") or "")
                 if isinstance(markdown_result, dict)
                 else ""
             )
+            if status == "no_data" or not markdown.strip():
+                return _no_data_result(
+                    str(markdown_result.get("no_data_reason") or "filing markdown unavailable"),
+                    details={"ticker": ticker, "doc_id": doc_id},
+                    suggested_reroute="Adjust filing range/doc_id or use filing list/chunk tools first.",
+                )
             items = _extract_metric_lines(markdown, hints, max_items=max_items)
             preview = []
             for item in items[:2]:
@@ -752,17 +839,23 @@ def register_filings_tools(mcp: FastMCP):
             )
         except Exception as e:
             logger.error(f"Extract filing key metrics failed: {e}")
-            return {"error": str(e)}
+            return {"error": {"code": "INTERNAL_ERROR", "message": str(e)}}
 
     @mcp.tool(tags={"filings"})
     async def extract_filing_section_facts(
         ticker: str,
         doc_id: str,
-        section_hints: list[str] = None,
+        section_hints: list[str] | None = None,
         max_quotes_per_section: int = 5,
         ctx: Context = None,
     ) -> Dict[str, Any]:
         """Extract section-level fact snippets from filing markdown."""
+        if _looks_a_share_symbol(ticker):
+            return _invalid_route_error(
+                "extract_filing_section_facts is US SEC-only and does not accept A-share ticker.",
+                details={"ticker": ticker, "doc_id": doc_id},
+                suggested_reroute="Use A-share announcement/news capabilities for CN filings.",
+            )
         default_sections = ["item 1a", "item 7", "item 8", "risk factors", "md&a"]
         hints = section_hints or default_sections
         max_quotes = max(1, min(int(max_quotes_per_section), 20))
@@ -781,11 +874,24 @@ def register_filings_tools(mcp: FastMCP):
                 ticker=ticker,
                 doc_id=doc_id,
             )
+            status = str(markdown_result.get("result_status") or "").strip().lower()
+            if status == "error":
+                return {
+                    "error": markdown_result.get("error")
+                    if isinstance(markdown_result.get("error"), dict)
+                    else {"code": "INTERNAL_ERROR", "message": str(markdown_result.get("error") or "unknown error")}
+                }
             markdown = (
                 str(markdown_result.get("content") or "")
                 if isinstance(markdown_result, dict)
                 else ""
             )
+            if status == "no_data" or not markdown.strip():
+                return _no_data_result(
+                    str(markdown_result.get("no_data_reason") or "filing markdown unavailable"),
+                    details={"ticker": ticker, "doc_id": doc_id},
+                    suggested_reroute="Adjust filing range/doc_id or use filing list/chunk tools first.",
+                )
             sections = _extract_section_facts(
                 markdown,
                 hints,
@@ -827,28 +933,47 @@ def register_filings_tools(mcp: FastMCP):
             )
         except Exception as e:
             logger.error(f"Extract filing section facts failed: {e}")
-            return {"error": str(e)}
+            return {"error": {"code": "INTERNAL_ERROR", "message": str(e)}}
 
     @mcp.tool(tags={"filings"})
     async def build_filing_citations(
         ticker: str,
         doc_id: str,
-        metric_hints: list[str] = None,
+        metric_hints: list[str] | None = None,
         max_items: int = 15,
         ctx: Context = None,
     ) -> Dict[str, Any]:
         """Build lightweight citation candidates from filing metric lines."""
+        if _looks_a_share_symbol(ticker):
+            return _invalid_route_error(
+                "build_filing_citations is US SEC-only and does not accept A-share ticker.",
+                details={"ticker": ticker, "doc_id": doc_id},
+                suggested_reroute="Use A-share announcement/news capabilities for CN filings.",
+            )
         max_items = max(5, min(int(max_items), 50))
         try:
             markdown_result = await filings_use_cases.get_filing_markdown(
                 ticker=ticker,
                 doc_id=doc_id,
             )
+            status = str(markdown_result.get("result_status") or "").strip().lower()
+            if status == "error":
+                return {
+                    "error": markdown_result.get("error")
+                    if isinstance(markdown_result.get("error"), dict)
+                    else {"code": "INTERNAL_ERROR", "message": str(markdown_result.get("error") or "unknown error")}
+                }
             markdown = (
                 str(markdown_result.get("content") or "")
                 if isinstance(markdown_result, dict)
                 else ""
             )
+            if status == "no_data" or not markdown.strip():
+                return _no_data_result(
+                    str(markdown_result.get("no_data_reason") or "filing markdown unavailable"),
+                    details={"ticker": ticker, "doc_id": doc_id},
+                    suggested_reroute="Adjust filing range/doc_id or use filing list/chunk tools first.",
+                )
             metric_items = _extract_metric_lines(
                 markdown,
                 metric_hints or ["revenue", "net income", "eps", "收入", "净利润", "毛利率"],
@@ -897,4 +1022,4 @@ def register_filings_tools(mcp: FastMCP):
             )
         except Exception as e:
             logger.error(f"Build filing citations failed: {e}")
-            return {"error": str(e)}
+            return {"error": {"code": "INTERNAL_ERROR", "message": str(e)}}
