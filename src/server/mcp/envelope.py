@@ -4,7 +4,7 @@ from typing import Any
 
 from mcp.types import CallToolResult, TextContent
 
-from src.server.mcp.tools.artifact_utils import create_mcp_error_result, create_mcp_tool_result
+from src.server.transports.mcp.artifacts import create_mcp_error_result, create_mcp_tool_result
 
 
 def _normalize_summary(raw: Any, fallback: str = "") -> str:

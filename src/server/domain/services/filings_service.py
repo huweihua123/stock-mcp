@@ -1,7 +1,8 @@
 # src/server/domain/services/filings_service.py
-"""FilingsService – fetches regulatory filings and announcements.
-Uses AdapterManager to retrieve data from appropriate sources (Finnhub for SEC, Akshare for A-share).
-Returns structured data (JSON).
+"""FilingsService – fetch regulatory filings and announcements.
+
+Uses the runtime provider facade to retrieve data from appropriate sources
+(Finnhub for SEC, Akshare for A-share) and returns structured JSON.
 """
 
 from datetime import datetime
@@ -19,15 +20,16 @@ class FilingsService:
     _A_SHARE_CODE_RE = re.compile(r"^(?:\d{6}|(?:SH|SZ)\d{6}|\d{6}\.(?:SH|SZ))$", re.IGNORECASE)
     _US_SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 
-    def __init__(self, adapter_manager, minio_client=None):
-        self.adapter_manager = adapter_manager
+    def __init__(self, provider_facade, minio_client=None):
+        """Initialize the service with the runtime provider facade."""
+        self.provider_facade = provider_facade
         self.minio_client = minio_client
         self.logger = logger
-        
+
         # Initialize edgartools identity and cache via sec_utils
         # This ensures consistent identity and avoids ticker.txt downloads
         from src.server.utils.sec_utils import get_company, get_cik_or_symbol
-        
+
         # No need to call set_identity here, sec_utils handles it on import
 
     def _extract_symbol(self, ticker: str) -> str:
@@ -268,7 +270,7 @@ class FilingsService:
         end_date_str: Optional[str],
         limit: int,
     ) -> List[Dict[str, Any]]:
-        """Internal unified method to fetch filings via AdapterManager."""
+        """Internal unified method to fetch filings via runtime provider facade."""
         try:
             start = (
                 datetime.strptime(start_date_str, "%Y-%m-%d")
@@ -277,11 +279,7 @@ class FilingsService:
             )
             end = datetime.strptime(end_date_str, "%Y-%m-%d") if end_date_str else None
 
-            # NOTE:
-            # market_gateway synthesizes ticker-scoped methods as
-            #   fn(raw_symbol, *args, **kwargs)
-            # so pass ticker as first positional arg, and keep the rest as keywords.
-            filings = await self.adapter_manager.get_filings(
+            filings = await self.provider_facade.get_filings(
                 ticker,
                 start_date=start,
                 end_date=end,

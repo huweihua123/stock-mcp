@@ -1,8 +1,5 @@
 # src/server/core/dependencies.py
-"""Dependency injection container for the project.
-All services, adapters, connections, cache, and settings are registered here.
-Modules can obtain instances via `Container.xxx()`.
-"""
+"""Dependency injection container for stable runtime resources."""
 
 from dependency_injector import containers, providers
 from src.server.config.settings import get_settings
@@ -27,11 +24,8 @@ from src.server.domain.adapters.fred_adapter import FredAdapter
 
 # Services
 from src.server.domain.services.fundamental_service import FundamentalService
-from src.server.domain.services.news_service import NewsService
 from src.server.domain.services.technical_service import TechnicalService
 from src.server.domain.services.filings_service import FilingsService
-from src.server.domain.services.money_flow_service import MoneyFlowService
-from src.server.domain.services.chip_service import ChipService
 from src.server.utils.proxy_utils import build_proxy_url
 
 # Cache wrapper (aiocache)
@@ -139,11 +133,11 @@ class Container(containers.DeclarativeContainer):
 
     edgar_adapter = providers.Singleton(EdgarAdapter, cache=cache, proxy_url=proxy_url)
 
-    # Adapter manager
-    from src.server.domain.adapter_manager import AdapterManager
+    # Runtime-native provider coordination
+    from src.server.runtime.provider_runtime import ProviderRuntime
 
-    adapter_manager = providers.Singleton(
-        AdapterManager,
+    provider_runtime = providers.Singleton(
+        ProviderRuntime,
         provider_timeout_seconds=providers.Callable(
             lambda cfg: cfg.timeout.provider_call_seconds,
             config,
@@ -162,19 +156,19 @@ class Container(containers.DeclarativeContainer):
 
     # Symbol resolver & gateway
     from src.server.domain.symbols import SymbolResolver
-    from src.server.domain.market_gateway import MarketGateway
     from src.server.domain.routing import MarketRouter, ProviderHealthTracker, RoutingPolicy
+    from src.server.runtime.provider_facade import ProviderFacade
 
     symbol_resolver = providers.Singleton(
         SymbolResolver,
         security_master_repo=security_master_repo,
-        adapter_manager=adapter_manager,
+        adapter_manager=provider_runtime,
     )
     routing_policy = providers.Singleton(RoutingPolicy.load)
     provider_health = providers.Singleton(ProviderHealthTracker)
     market_router = providers.Singleton(
         MarketRouter,
-        adapter_manager=adapter_manager,
+        adapter_manager=provider_runtime,
         security_master_repo=security_master_repo,
         routing_policy=routing_policy,
         health_tracker=provider_health,
@@ -183,9 +177,9 @@ class Container(containers.DeclarativeContainer):
             config,
         ),
     )
-    market_gateway = providers.Singleton(
-        MarketGateway,
-        adapter_manager=adapter_manager,
+    provider_facade = providers.Singleton(
+        ProviderFacade,
+        provider_runtime=provider_runtime,
         symbol_resolver=symbol_resolver,
         market_router=market_router,
     )
@@ -198,35 +192,15 @@ class Container(containers.DeclarativeContainer):
     # Services (receive adapter manager and cache)
     fundamental_service = providers.Factory(
         FundamentalService,
-        adapter_manager=market_gateway,
+        provider_facade=provider_facade,
         cache=cache,
-    )
-    news_service = providers.Factory(
-        NewsService,
-        adapter_manager=market_gateway,
-        cache=cache,
-        api_keys=providers.Callable(lambda cfg: cfg.api_keys.model_dump(), config),
-        proxy_url=proxy_url,
     )
     technical_service = providers.Factory(
         TechnicalService,
-        adapter_manager=market_gateway,
+        provider_facade=provider_facade,
     )
     filings_service = providers.Factory(
         FilingsService,
-        adapter_manager=market_gateway,
+        provider_facade=provider_facade,
         minio_client=minio_client,
-    )
-
-    # 资金流向服务
-    money_flow_service = providers.Factory(
-        MoneyFlowService,
-        adapter_manager=market_gateway,
-    )
-
-    # 筹码分布服务
-    chip_service = providers.Factory(
-        ChipService,
-        adapter_manager=market_gateway,
-        cache=cache,
     )

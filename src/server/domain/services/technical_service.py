@@ -15,13 +15,9 @@ from src.server.utils.logger import logger
 class TechnicalService:
     """Technical analysis service."""
 
-    def __init__(self, adapter_manager):
-        """Initialize technical analysis service.
-
-        Args:
-            adapter_manager: AdapterManager instance for fetching price data
-        """
-        self.adapter_manager = adapter_manager
+    def __init__(self, provider_facade):
+        """Initialize the service with the runtime provider facade."""
+        self.provider_facade = provider_facade
         logger.info("Technical analysis service initialized")
 
     async def _get_price_data(
@@ -29,8 +25,8 @@ class TechnicalService:
     ) -> Optional[pd.DataFrame]:
         """Fetch price data and convert to DataFrame."""
         try:
-            if not self.adapter_manager:
-                logger.error("Adapter manager not initialized")
+            if not self.provider_facade:
+                logger.error("Provider facade not initialized")
                 return None
 
             # Parse period to days
@@ -45,9 +41,7 @@ class TechnicalService:
             end_date = datetime.now()
             start_date = end_date - timedelta(days=days)
 
-            # Fetch historical data
-            # Note: adapter_manager.get_historical_prices returns List[AssetPrice]
-            prices = await self.adapter_manager.get_historical_prices(
+            prices = await self.provider_facade.get_historical_prices(
                 symbol, start_date, end_date, interval
             )
 
@@ -176,9 +170,7 @@ class TechnicalService:
                 end_date=end_date.strftime("%Y-%m-%d"),
             )
 
-            # Delegate to AdapterManager
-            # The adapter will handle data fetching and calculation (returning time series)
-            result = await self.adapter_manager.get_technical_indicators(
+            result = await self.provider_facade.get_technical_indicators(
                 ticker=symbol,
                 indicators=["MA", "MACD", "KDJ", "RSI", "VOL"],
                 period="daily",  # Adapter currently only supports daily logic effectively

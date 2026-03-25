@@ -217,16 +217,16 @@ class FinancialRatios:
 
 
 class FundamentalService:
-    """Fundamental Analysis Service."""
+    """Fundamental analysis service backed by the runtime provider facade."""
 
-    def __init__(self, adapter_manager, cache):
-        self.adapter_manager = adapter_manager
+    def __init__(self, provider_facade, cache):
+        self.provider_facade = provider_facade
         self.cache = cache
         self.logger = logger
 
     async def _fetch_financial_data(self, ticker: str) -> Dict[str, Any]:
         try:
-            return await self.adapter_manager.get_financials(ticker)
+            return await self.provider_facade.get_financials(ticker)
         except Exception as e:
             self.logger.error(f"Failed to fetch financial data for {ticker}: {e}")
             raise

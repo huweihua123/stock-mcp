@@ -164,49 +164,55 @@ MCP 入口：
 
 ```text
                 +-----------------------------+
-                |        MCP Clients          |
-                | Claude / Cursor / DeerFlow  |
+                |    MCP Clients / HTTP Apps  |
+                | Claude / Cursor / Backends  |
                 +--------------+--------------+
                                |
                                v
-                        /mcp (MCP / JSON-RPC)
-
-                +-----------------------------+
-                |         stock-mcp           |
-                |  FastAPI + FastMCP server   |
-                +-----------------------------+
-                  |           |            |
-                  |           |            |
-                  v           v            v
-              REST API    MCP Tools   Code Export
-             /api/v1/*      /mcp      CSV / JSON
-
-                  |
-                  v
-      +-------------------------------------------+
-      | Domain Services / Adapter Manager / Router |
-      +-------------------------------------------+
-          |         |         |         |        |
-          v         v         v         v        v
-      Tushare   Akshare   Baostock   Yahoo   Finnhub ...
-
-                  |
-                  v
-             Redis / Postgres
+                    +-----------------------+
+                    |   Thin Transports     |
+                    |  HTTP / MCP / Docs    |
+                    +-----------+-----------+
+                                |
+                                v
+                    +-----------------------+
+                    |        Runtime        |
+                    | auth / proxy / health |
+                    | lifecycle / registry  |
+                    +-----------+-----------+
+                                |
+                +---------------+----------------+
+                |                                |
+                v                                v
+        Capability Plugins                Provider Plugins
+      market / filings / news         tushare / yahoo / edgar
+      money_flow / code_export        finnhub / fred / akshare
+                |                                |
+                +---------------+----------------+
+                                |
+                                v
+                           Redis / Postgres
 ```
 
 职责分层大致是：
 
-- `src/server/api/`
-  - FastAPI 路由
-- `src/server/mcp/`
-  - MCP server、tool registry、tool envelope
+- `src/server/runtime/`
+  - 稳定骨架：配置、鉴权、代理策略、provider/capability registry、生命周期、健康状态
+- `src/server/capabilities/`
+  - 业务能力插件：每个能力自带 `plugin / service / http / mcp / schema`
+- `src/server/providers/`
+  - 数据源插件：每个 provider 声明自己支持的 contract
+- `src/server/transports/`
+  - 薄入口：HTTP / MCP 只负责协议适配，不承载业务判断
 - `src/server/domain/`
-  - adapter、service、router、symbol 逻辑
-- `src/server/infrastructure/`
-  - Redis、Postgres、外部连接
-- `src/server/core/`
-  - 依赖注入、启动流程、配置
+  - 保留 provider 路由、符号解析、部分领域服务等底层实现；不再作为新增能力入口
+
+当前重构方向是：
+
+- 不再围绕一个大而全的 `BaseDataAdapter` 扩展
+- 不再让 route / tool / service 三处并行增长
+- 新能力优先通过 capability plugin 接入
+- 新数据源优先通过 provider plugin + contract 接入
 
 ### 认证模式
 
@@ -306,7 +312,7 @@ uv run python -c "import src.server.mcp.server as m; m.create_mcp_server().run(t
 #### HTTP API 示例
 
 ```bash
-curl -X POST http://127.0.0.1:9898/api/v1/market/indicators/calculate \
+curl -X POST http://127.0.0.1:9898/api/v1/technical/indicators/calculate \
   -H "Content-Type: application/json" \
   -d '{
     "symbol": "SSE:600519",
@@ -326,7 +332,7 @@ curl -X POST http://127.0.0.1:9898/mcp \
     "params": {
       "name": "get_kline_data",
       "arguments": {
-        "ticker": "SSE:600519"
+        "symbol": "SSE:600519"
       }
     },
     "id": "1"
@@ -428,6 +434,7 @@ Default host ports:
 HTTP route groups:
 
 - `/api/v1/market/*`
+- `/api/v1/technical/*`
 - `/api/v1/fundamental/*`
 - `/api/v1/money-flow/*`
 - `/api/v1/news/*`
@@ -443,20 +450,42 @@ MCP endpoint:
 ### Architecture
 
 ```text
-MCP clients / HTTP clients
+MCP clients / HTTP apps
           |
           v
-    FastAPI + FastMCP
+  Thin transports (HTTP / MCP)
           |
           v
-Domain services / Adapter manager / Router
+Runtime substrate
+auth / proxy / lifecycle / registries
           |
           v
-Tushare / Akshare / Baostock / Yahoo / Finnhub / FRED / CCXT / EDGAR ...
+Capability plugins <-> Provider plugins
           |
           v
 Redis / Postgres
 ```
+
+The runtime/plugin refactor is complete. Internal layering:
+
+- `src/server/runtime/`
+  - stable substrate for auth, proxy policy, provider/capability registry, lifecycle, and health
+- `src/server/capabilities/`
+  - business capability plugins such as `market`, `filings`, `news`, `money_flow`, `code_export`
+- `src/server/providers/`
+  - provider plugins declaring which contracts they implement
+- `src/server/transports/`
+  - thin HTTP/MCP protocol adapters
+- `src/server/domain/`
+  - symbol resolution and lower-level domain services behind the runtime/provider facade surface; not an extension entrypoint
+
+Only heavy internal logic remains in `src/server/domain/services/`; lightweight capabilities stay capability-local by default.
+
+Extension rules:
+
+- new capabilities should be added as capability plugins
+- new data sources should be added as provider plugins
+- HTTP and MCP surfaces are composed from the same capability registry
 
 ### Authentication modes
 
@@ -523,7 +552,7 @@ uv run python -c "import src.server.mcp.server as m; m.create_mcp_server().run(t
 HTTP:
 
 ```bash
-curl -X POST http://127.0.0.1:9898/api/v1/market/indicators/calculate \
+curl -X POST http://127.0.0.1:9898/api/v1/technical/indicators/calculate \
   -H "Content-Type: application/json" \
   -d '{
     "symbol": "SSE:600519",
@@ -543,7 +572,7 @@ curl -X POST http://127.0.0.1:9898/mcp \
     "params": {
       "name": "get_kline_data",
       "arguments": {
-        "ticker": "SSE:600519"
+        "symbol": "SSE:600519"
       }
     },
     "id": "1"

@@ -10,7 +10,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from src.server.mcp.envelope import normalize_tool_exception, normalize_tool_result
-from src.server.mcp.tools.artifact_utils import (
+from src.server.transports.mcp.artifacts import (
     create_artifact_envelope,
     create_artifact_list_response,
     create_artifact_response,
