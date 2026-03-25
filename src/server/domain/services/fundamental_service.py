@@ -552,7 +552,7 @@ class FundamentalService:
             advice = self._generate_investment_advice(health_score, all_ratios)
 
             return {
-                "component_type": "financial_chart",  # ⭐ 添加组件类型以支持可视化
+                "variant": "financial_chart",
                 "ticker": ticker,
                 "symbol": ticker,
                 "title": f"财务分析: {ticker}",

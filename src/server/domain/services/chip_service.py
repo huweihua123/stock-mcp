@@ -48,7 +48,7 @@ class ChipService:
         Returns:
             {
                 "symbol": "600519.SH",
-                "component_type": "chip_distribution",
+                "variant": "chip_distribution",
                 "current_price": 1800.0,
                 "data": {
                     "price_levels": [1700, 1710, 1720, ...],  # 价格区间中点
@@ -83,7 +83,7 @@ class ChipService:
                 return {
                     "error": f"Insufficient price data for {symbol}",
                     "symbol": symbol,
-                    "component_type": "chip_distribution",
+                    "variant": "chip_distribution",
                 }
 
             # 2. 转换为 DataFrame
@@ -200,7 +200,7 @@ class ChipService:
 
             result = {
                 "symbol": symbol,
-                "component_type": "chip_distribution",
+                "variant": "chip_distribution",
                 "current_price": round(current_price, 2),
                 "trade_date": trade_date,
                 "chip_trade_date": trade_date,
@@ -240,7 +240,7 @@ class ChipService:
             return {
                 "error": str(e),
                 "symbol": symbol,
-                "component_type": "chip_distribution",
+                "variant": "chip_distribution",
             }
 
     async def get_winner_rate(self, symbol: str) -> Dict[str, Any]:

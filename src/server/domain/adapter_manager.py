@@ -24,6 +24,12 @@ from src.server.domain.types import (
 
 logger = logging.getLogger(__name__)
 
+_SECTOR_SOFT_FALLBACK_METHODS = {
+    "get_sector_trend",
+    "get_sector_money_flow_history",
+    "get_sector_valuation_metrics",
+}
+
 
 class AdapterManager:
     """Manager for coordinating multiple asset data adapters.
@@ -233,13 +239,32 @@ class AdapterManager:
             ValueError: If no adapter supports the method.
         """
         last_error: Exception = ValueError(f"No adapter supports {method}")
+        last_soft_result: Any = None
         for adapter in self._adapter_order:
             try:
+                adapter_kwargs = self._normalize_market_kwargs_for_adapter(
+                    adapter=adapter,
+                    method=method,
+                    kwargs=kwargs,
+                )
                 result = await asyncio.wait_for(
-                    getattr(adapter, method)(**kwargs),
+                    getattr(adapter, method)(**adapter_kwargs),
                     timeout=self._provider_timeout_seconds,
                 )
                 if result is not None:
+                    if self._should_soft_fallback_market_result(method, result):
+                        last_soft_result = result
+                        last_error = ValueError(
+                            f"soft no-data result from {adapter.source.value}.{method}"
+                        )
+                        logger.info(
+                            "soft no-data result, trying next adapter",
+                            extra={
+                                "method": method,
+                                "adapter": adapter.source.value,
+                            },
+                        )
+                        continue
                     return result
             except NotImplementedError:
                 continue
@@ -255,7 +280,128 @@ class AdapterManager:
                 last_error = e
                 logger.warning(f"{adapter.source.value}.{method}() failed: {e}")
 
+        if last_soft_result is not None:
+            return last_soft_result
         raise ValueError(f"No adapter supports {method}: {last_error}")
+
+    def _normalize_market_kwargs_for_adapter(
+        self,
+        *,
+        adapter: BaseDataAdapter,
+        method: str,
+        kwargs: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if method not in _SECTOR_SOFT_FALLBACK_METHODS:
+            return kwargs
+        if not isinstance(kwargs, dict):
+            return kwargs
+
+        normalized = dict(kwargs)
+        sector_id = str(normalized.get("sector_id") or "").strip().upper()
+        if not sector_id:
+            return normalized
+
+        if adapter.source == DataSource.TUSHARE:
+            # Tushare sector ids should be ths_index ts_code (e.g. 877042.TI).
+            if not sector_id.endswith(".TI"):
+                normalized["sector_id"] = None
+            return normalized
+
+        if adapter.source == DataSource.AKSHARE:
+            # AkShare board ids use BK**** style codes.
+            if not sector_id.startswith("BK"):
+                normalized["sector_id"] = None
+            return normalized
+
+        return normalized
+
+    async def _canonicalize_resolved_sector(
+        self,
+        result: Dict[str, Any],
+        *,
+        intent: str,
+    ) -> Dict[str, Any]:
+        if not isinstance(result, dict):
+            return result
+        if str(result.get("status", "")).lower() != "resolved":
+            return result
+
+        canonical: Dict[str, Any] = dict(result)
+        provider_sector_id = str(canonical.get("sector_id") or "").strip().upper()
+        if not provider_sector_id:
+            return canonical
+
+        canonical.setdefault("provider_sector_id", provider_sector_id)
+        canonical.setdefault("canonical_sector_id", provider_sector_id)
+        canonical.setdefault(
+            "canonical_source",
+            str(canonical.get("source") or "").strip().lower() or "unknown",
+        )
+        if provider_sector_id.endswith(".TI"):
+            canonical["canonical_source"] = "tushare"
+            return canonical
+
+        tushare = self.adapters.get(DataSource.TUSHARE)
+        if not tushare:
+            return canonical
+
+        query_text = str(
+            canonical.get("canonical_name")
+            or canonical.get("query_text")
+            or ""
+        ).strip()
+        if not query_text:
+            return canonical
+
+        try:
+            ts_result = await asyncio.wait_for(
+                tushare.resolve_sector(query_text=query_text, intent=intent),
+                timeout=self._provider_timeout_seconds,
+            )
+            if not isinstance(ts_result, dict):
+                return canonical
+            if str(ts_result.get("status", "")).lower() != "resolved":
+                return canonical
+            ts_sector_id = str(ts_result.get("sector_id") or "").strip().upper()
+            if not ts_sector_id:
+                return canonical
+            canonical["sector_id"] = ts_sector_id
+            canonical["canonical_sector_id"] = ts_sector_id
+            canonical["canonical_source"] = "tushare"
+            ts_name = str(ts_result.get("canonical_name") or "").strip()
+            if ts_name:
+                canonical["canonical_name"] = ts_name
+            return canonical
+        except Exception:
+            return canonical
+
+    @staticmethod
+    def _should_soft_fallback_market_result(method: str, result: Any) -> bool:
+        if method not in _SECTOR_SOFT_FALLBACK_METHODS:
+            return False
+        if not isinstance(result, dict):
+            return False
+
+        if str(result.get("error") or "").strip():
+            return True
+
+        candidates = result.get("candidates")
+        if isinstance(candidates, list) and len(candidates) > 0:
+            return True
+
+        if method == "get_sector_trend":
+            trend = result.get("trend")
+            return isinstance(trend, list) and len(trend) == 0
+
+        if method == "get_sector_money_flow_history":
+            records = result.get("records")
+            return isinstance(records, list) and len(records) == 0
+
+        if method == "get_sector_valuation_metrics":
+            history = result.get("history")
+            return isinstance(history, list) and len(history) == 0
+
+        return False
 
     # =========================================================================
     # Core price / asset operations  (use dedicated implementations for perf)
@@ -508,12 +654,16 @@ class AdapterManager:
     ) -> Dict[str, Any]:
         """Resolve sector with cross-adapter fallback.
 
-        Prefer first adapter that returns:
-        - resolved
-        - ambiguous
-        If an adapter returns not_found, continue trying the next adapter.
+        Priority policy for CN sector id dialect consistency:
+        1. Tushare resolved (.TI canonical)
+        2. Tushare ambiguous (let LLM choose candidate)
+        3. Other adapters resolved
+        4. First ambiguous / last_not_found fallback
         """
         last_not_found: Optional[Dict[str, Any]] = None
+        first_ambiguous: Optional[Dict[str, Any]] = None
+        first_non_tushare_resolved: Optional[Dict[str, Any]] = None
+        tushare_ambiguous: Optional[Dict[str, Any]] = None
         last_error: Optional[Exception] = None
         for adapter in self._adapter_order:
             try:
@@ -524,8 +674,22 @@ class AdapterManager:
                 if not isinstance(result, dict):
                     continue
                 status = str(result.get("status", "")).lower()
-                if status in {"resolved", "ambiguous"}:
-                    return result
+                if status == "resolved":
+                    canonical_resolved = await self._canonicalize_resolved_sector(
+                        result,
+                        intent=intent,
+                    )
+                    if adapter.source == DataSource.TUSHARE:
+                        return canonical_resolved
+                    if first_non_tushare_resolved is None:
+                        first_non_tushare_resolved = canonical_resolved
+                    continue
+                if status == "ambiguous":
+                    if first_ambiguous is None:
+                        first_ambiguous = result
+                    if adapter.source == DataSource.TUSHARE:
+                        tushare_ambiguous = result
+                    continue
                 if status == "not_found":
                     last_not_found = result
                     continue
@@ -544,6 +708,12 @@ class AdapterManager:
                 last_error = e
                 logger.warning(f"{adapter.source.value}.resolve_sector() failed: {e}")
 
+        if tushare_ambiguous is not None:
+            return tushare_ambiguous
+        if first_non_tushare_resolved is not None:
+            return first_non_tushare_resolved
+        if first_ambiguous is not None:
+            return first_ambiguous
         if last_not_found is not None:
             return last_not_found
         raise ValueError(f"No adapter supports resolve_sector: {last_error}")

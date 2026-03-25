@@ -92,7 +92,7 @@ class FredAdapter(BaseDataAdapter):
         )
         if not series:
             return {
-                "component_type": "us_gdp",
+                "variant": "us_gdp",
                 "source": "fred",
                 "data": [],
             }
@@ -126,7 +126,7 @@ class FredAdapter(BaseDataAdapter):
 
         rows = rows[-quarters:]
         result = {
-            "component_type": "us_gdp",
+            "variant": "us_gdp",
             "source": "fred",
             "data": rows,
         }
@@ -177,7 +177,7 @@ class FredAdapter(BaseDataAdapter):
 
         rows = rows[-months:]
         result = {
-            "component_type": "us_inflation",
+            "variant": "us_inflation",
             "source": "fred",
             "data": rows,
         }
@@ -231,7 +231,7 @@ class FredAdapter(BaseDataAdapter):
 
         rows = rows[-days:]
         result = {
-            "component_type": "us_interest_rates",
+            "variant": "us_interest_rates",
             "source": "fred",
             "data": rows,
         }
@@ -300,7 +300,7 @@ class FredAdapter(BaseDataAdapter):
         proxy = self.proxy_url if self.proxy_url else None
 
         url = f"{self.base_url}/series/observations"
-        async with httpx.AsyncClient(timeout=timeout, proxy=proxy) as client:
+        async with httpx.AsyncClient(timeout=timeout, proxy=proxy, trust_env=False) as client:
             resp = await client.get(url, params=params)
             resp.raise_for_status()
             payload = resp.json()

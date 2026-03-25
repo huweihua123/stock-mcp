@@ -68,11 +68,11 @@ class FilingsService:
         message: str,
         details: Dict[str, Any] | None = None,
         retriable: bool = False,
-        suggested_reroute: str = "Reroute to an appropriate capability before retrying.",
+        suggested_reroute: str = "Reroute to an appropriate data route before retrying.",
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
-            "result_status": "error",
-            "summary": message,
+            "status": "error",
+            "message": message,
             "error": {
                 "code": code,
                 "message": message,
@@ -91,8 +91,8 @@ class FilingsService:
         suggested_reroute: str = "Broaden time window, change symbol scope, or switch to alternative evidence source.",
     ) -> Dict[str, Any]:
         return {
-            "result_status": "no_data",
-            "summary": reason,
+            "status": "no_data",
+            "message": reason,
             "no_data_reason": reason,
             "scope": details or {},
             "retriable": False,
@@ -331,7 +331,7 @@ class FilingsService:
                     message="process_document is US SEC-only; A-share/cninfo inputs are not supported.",
                     details={"ticker": ticker, "doc_id": doc_id, "url": url},
                     retriable=False,
-                    suggested_reroute="Use A-share announcement/news capabilities for CN filings.",
+                    suggested_reroute="Use A-share announcement/news tools for CN filings.",
                 )
             if not self._is_us_ticker(ticker):
                 return self._error_result(
@@ -438,7 +438,7 @@ class FilingsService:
             )
 
             return {
-                "result_status": "ok",
+                "status": "ok",
                 "doc_id": doc_id,
                 "type": "text",
                 "url": url,
@@ -482,7 +482,7 @@ class FilingsService:
                 message="get_filing_markdown is US SEC-only; A-share ticker is not supported.",
                 details={"ticker": ticker, "doc_id": doc_id},
                 retriable=False,
-                suggested_reroute="Use A-share announcement/news capabilities for CN filings.",
+                suggested_reroute="Use A-share announcement/news tools for CN filings.",
             )
         if not self._is_us_ticker(ticker):
             return self._error_result(
@@ -509,7 +509,7 @@ class FilingsService:
                     cached_bytes = await self.minio_client.download_bytes(cache_object_name)
                     if cached_bytes:
                         return {
-                            "result_status": "ok",
+                            "status": "ok",
                             "cached": True,
                             "content": cached_bytes.decode("utf-8"),
                             "doc_id": doc_id,
@@ -614,7 +614,7 @@ class FilingsService:
                     self.logger.warning(f"Failed to cache to MinIO: {e}")
             
             return {
-                "result_status": "ok",
+                "status": "ok",
                 "cached": False,
                 "content": full_markdown,
                 "doc_id": doc_id,

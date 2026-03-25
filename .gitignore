@@ -25,12 +25,12 @@ pip-wheel-metadata/
 __pypackages__/
 
 # Virtual environments
-# venv/
-# ENV/
-# env/
-# .venv/
-# env.bak/
-# venv.bak/
+venv/
+ENV/
+env/
+.venv/
+env.bak/
+venv.bak/
 
 # Installer logs
 pip-log.txt
@@ -55,7 +55,7 @@ profile_default/
 ipython_config.py
 
 # pyenv
-.python-version
+!.python-version
 
 # pipenv
 Pipfile.lock
@@ -105,8 +105,3 @@ docker-compose.*.local.yml
 # Misc
 *.sqlite3
 *.db
-
-# Tests
-tests/
-
-# Keep .env.example committed (do not ignore)

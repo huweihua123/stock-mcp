@@ -45,7 +45,7 @@ class MoneyFlowService:
             return result
         except Exception as e:
             self.logger.error(f"Failed to get money flow for {symbol}: {e}")
-            return {"error": str(e), "symbol": symbol, "component_type": "money_flow"}
+            return {"error": str(e), "symbol": symbol, "variant": "money_flow"}
 
     async def get_north_bound_flow(self, days: int = 30) -> Dict[str, Any]:
         """
@@ -64,4 +64,4 @@ class MoneyFlowService:
             return result
         except Exception as e:
             self.logger.error(f"Failed to get north bound flow: {e}")
-            return {"error": str(e), "component_type": "north_bound_flow"}
+            return {"error": str(e), "variant": "north_bound_flow"}

@@ -248,7 +248,7 @@ class AlphaVantageAdapter(BaseDataAdapter):
         proxy = None
         if self.proxy_url:
             proxy = self.proxy_url
-        async with httpx.AsyncClient(timeout=timeout, proxy=proxy) as client:
+        async with httpx.AsyncClient(timeout=timeout, proxy=proxy, trust_env=False) as client:
             resp = await client.get(self.base_url, params=params)
             resp.raise_for_status()
             return resp.json()

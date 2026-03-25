@@ -32,6 +32,7 @@ from src.server.domain.services.technical_service import TechnicalService
 from src.server.domain.services.filings_service import FilingsService
 from src.server.domain.services.money_flow_service import MoneyFlowService
 from src.server.domain.services.chip_service import ChipService
+from src.server.utils.proxy_utils import build_proxy_url
 
 # Cache wrapper (aiocache)
 from src.server.infrastructure.cache.redis_cache import AsyncRedisCache
@@ -53,7 +54,17 @@ class Container(containers.DeclarativeContainer):
     )
     finnhub = providers.Singleton(
         FinnhubConnection,
-        config=providers.Callable(lambda cfg: cfg.finnhub.model_dump(), config),
+        config=providers.Callable(
+            lambda cfg: {
+                **cfg.finnhub.model_dump(),
+                "proxy_url": build_proxy_url(
+                    cfg.proxy.enabled,
+                    cfg.proxy.host,
+                    cfg.proxy.port,
+                ),
+            },
+            config,
+        ),
     )
     baostock = providers.Singleton(
         BaostockConnection,
@@ -80,21 +91,19 @@ class Container(containers.DeclarativeContainer):
     cache = providers.Singleton(AsyncRedisCache, redis_client=redis)
 
     # Adapters (each receives cache for result caching)
+    proxy_url = providers.Callable(
+        lambda cfg: build_proxy_url(cfg.proxy.enabled, cfg.proxy.host, cfg.proxy.port),
+        config,
+    )
+
     yahoo_adapter = providers.Singleton(
         YahooAdapter,
         cache=cache,
-        proxy_url=providers.Callable(
-            lambda cfg: (
-                f"http://{cfg.proxy.host}:{cfg.proxy.port}"
-                if cfg.proxy.enabled
-                else None
-            ),
-            config,
-        ),
+        proxy_url=proxy_url,
     )
     akshare_adapter = providers.Singleton(AkshareAdapter, cache=cache)
-    crypto_adapter = providers.Singleton(CryptoAdapter, cache=cache)
-    ccxt_adapter = providers.Singleton(CCXTAdapter, cache=cache)
+    crypto_adapter = providers.Singleton(CryptoAdapter, cache=cache, proxy_url=proxy_url)
+    ccxt_adapter = providers.Singleton(CCXTAdapter, cache=cache, proxy_url=proxy_url)
     tushare_adapter = providers.Singleton(
         TushareAdapter, tushare_conn=tushare, cache=cache
     )
@@ -105,58 +114,30 @@ class Container(containers.DeclarativeContainer):
     futures_adapter = providers.Singleton(
         FuturesAdapter,
         cache=cache,
-        proxy_url=providers.Callable(
-            lambda cfg: (
-                f"http://{cfg.proxy.host}:{cfg.proxy.port}"
-                if cfg.proxy.enabled
-                else None
-            ),
-            config,
-        ),
+        proxy_url=proxy_url,
     )
     alpha_vantage_adapter = providers.Singleton(
         AlphaVantageAdapter,
         api_key=providers.Callable(lambda cfg: cfg.api_keys.alpha_vantage or "", config),
         cache=cache,
-        proxy_url=providers.Callable(
-            lambda cfg: (
-                f"http://{cfg.proxy.host}:{cfg.proxy.port}"
-                if cfg.proxy.enabled
-                else None
-            ),
-            config,
-        ),
+        proxy_url=proxy_url,
     )
     twelve_data_adapter = providers.Singleton(
         TwelveDataAdapter,
         api_key=providers.Callable(lambda cfg: cfg.api_keys.twelve_data or "", config),
         cache=cache,
-        proxy_url=providers.Callable(
-            lambda cfg: (
-                f"http://{cfg.proxy.host}:{cfg.proxy.port}"
-                if cfg.proxy.enabled
-                else None
-            ),
-            config,
-        ),
+        proxy_url=proxy_url,
     )
     fred_adapter = providers.Singleton(
         FredAdapter,
         api_key=providers.Callable(lambda cfg: cfg.api_keys.fred or "", config),
         cache=cache,
-        proxy_url=providers.Callable(
-            lambda cfg: (
-                f"http://{cfg.proxy.host}:{cfg.proxy.port}"
-                if cfg.proxy.enabled
-                else None
-            ),
-            config,
-        ),
+        proxy_url=proxy_url,
     )
 
     from src.server.domain.adapters.edgar_adapter import EdgarAdapter
 
-    edgar_adapter = providers.Singleton(EdgarAdapter, cache=cache)
+    edgar_adapter = providers.Singleton(EdgarAdapter, cache=cache, proxy_url=proxy_url)
 
     # Adapter manager
     from src.server.domain.adapter_manager import AdapterManager
@@ -225,6 +206,7 @@ class Container(containers.DeclarativeContainer):
         adapter_manager=market_gateway,
         cache=cache,
         api_keys=providers.Callable(lambda cfg: cfg.api_keys.model_dump(), config),
+        proxy_url=proxy_url,
     )
     technical_service = providers.Factory(
         TechnicalService,

@@ -1,45 +1,57 @@
 # src/server/mcp/tools/artifact_utils.py
 """
-Artifact 工具函数
+MCP resource helpers for stock-mcp tools.
 
-MCP 工具返回结构化数据，前端渲染可视化组件
+All tool outputs are normalized to pure MCP CallToolResult payloads:
+- content
+- structuredContent
+- isError
+
+Structured resources are always file-backed and exposed via a lightweight
+`structuredContent.resources[]` catalog. Tool `content` stays text-only so
+large artifact payloads do not get inlined back into the model context.
+
+To align with DeerFlow, resource identity is the virtual workspace path
+(`/mnt/user-data/...`) and financial renderer hints live inside the JSON file
+content itself instead of the outer descriptor.
 """
 
-from datetime import datetime
+from __future__ import annotations
+
+import json
+import tempfile
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union, TypedDict
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4
 
+from mcp.types import CallToolResult, TextContent
 
-class ComponentType(str, Enum):
-    """组件类型"""
+_OUTPUT_ROOT = Path(tempfile.gettempdir()) / "stock-mcp-outputs"
 
-    # 核心
-    PLAN_TASK = "plan_task"
-    TOOL_CALL = "tool_call"
-    # 表格
+
+class ResourceVariant(str, Enum):
     TABLE = "table"
-    # 股票数据
     FINANCIAL_CHART = "financial_chart"
     TECHNICAL_INDICATORS = "technical_indicators"
     CHIP_DISTRIBUTION = "chip_distribution"
     MONEY_FLOW = "money_flow"
     REAL_TIME_QUOTE = "real_time_quote"
-    # 市场数据
     MARKET_LIQUIDITY = "market_liquidity"
     SECTOR_FLOW = "sector_flow"
     NORTH_BOUND_FLOW = "north_bound_flow"
-    # 宏观数据
     INFLATION_DATA = "inflation_data"
     MONEY_SUPPLY = "money_supply"
     PMI_DATA = "pmi_data"
     GDP_DATA = "gdp_data"
     SOCIAL_FINANCING = "social_financing"
     MACRO_INDICATOR = "macro_indicator"
-    # 新闻
     NEWS_CITATIONS = "news_citations"
     RESEARCH_REPORTS = "research_reports"
-    # 美股专用
+    SECTOR_UNIVERSE = "sector_universe"
+    PEER_BENCHMARK = "peer_benchmark"
+    VALUE_CHAIN = "value_chain"
+    SECTOR_EVIDENCE_PACK = "sector_evidence_pack"
     US_TECHNICAL_CHART = "us_technical_chart"
     EARNINGS_TABLE = "earnings_table"
     CASH_FLOW_CHART = "cash_flow_chart"
@@ -48,96 +60,231 @@ class ComponentType(str, Enum):
     US_VOLUME_ANALYSIS = "us_volume_analysis"
     US_SECTOR_ETF = "us_sector_etf"
     US_NEWS_SENTIMENT = "us_news_sentiment"
-    # 其他
     OTHER = "other"
 
 
-class ArtifactResponse(TypedDict):
-    """MCP 工具的标准返回结构 (Data Layering)"""
-
-    summary: str
-    """给 LLM 看的摘要 (必须是字符串)"""
-
-    artifact: Dict[str, Any]
-    """给前端/Agent 内部使用的全量数据"""
+def _slugify(value: str) -> str:
+    slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(value or "artifact"))
+    slug = slug.strip("-")
+    return slug or "artifact"
 
 
-class ArtifactListResponse(TypedDict):
-    """MCP 工具的多产物返回结构"""
+def _normalize_variant(variant: Union[str, ResourceVariant]) -> str:
+    if isinstance(variant, ResourceVariant):
+        return variant.value
+    return str(variant or "other").strip().lower().replace("-", "_") or "other"
 
-    summary: str
-    """给 LLM 看的摘要 (必须是字符串)"""
 
-    artifacts: List[Dict[str, Any]]
-    """多个 Artifact"""
+def _json_bytes(payload: Any) -> bytes:
+    return json.dumps(payload, ensure_ascii=False, indent=2, default=str).encode("utf-8")
+
+
+def _virtual_output_path(filename: str) -> str:
+    return f"/mnt/user-data/outputs/{filename}"
+
+
+def _descriptor_from_envelope(envelope: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "uri": envelope["uri"],
+        "workspacePath": envelope.get("workspacePath") or envelope["uri"],
+        "name": envelope["name"],
+        "description": envelope.get("description") or "",
+        "mimeType": envelope.get("mimeType") or "application/json",
+        "displayInReport": bool(envelope.get("displayInReport", True)),
+    }
+
+
+def write_json_artifact(
+    output_dir: str | Path | None = None,
+    *,
+    name: str,
+    payload: Any,
+) -> tuple[str, bytes]:
+    slug = _slugify(name)
+    filename = f"{slug}-{uuid4().hex[:8]}.json"
+    output_root = Path(output_dir or _OUTPUT_ROOT)
+    output_root.mkdir(parents=True, exist_ok=True)
+    raw_bytes = _json_bytes(payload)
+    host_path = output_root / filename
+    host_path.write_bytes(raw_bytes)
+    return filename, raw_bytes
+
+
+def create_resource_descriptor(
+    *,
+    uri: str,
+    name: str,
+    description: str = "",
+    mime_type: str = "application/json",
+    display_in_report: bool = True,
+) -> Dict[str, Any]:
+    return {
+        "uri": uri,
+        "workspacePath": uri,
+        "name": name,
+        "description": description,
+        "mimeType": mime_type,
+        "displayInReport": display_in_report,
+    }
 
 
 def create_artifact_envelope(
-    component_type: Union[str, ComponentType],
+    variant: Union[str, ResourceVariant],
     name: str,
     content: Any,
     description: str = "",
     metadata: Optional[Dict[str, Any]] = None,
     visible_to_llm: bool = False,
     display_in_report: bool = True,
+    source_tool: Optional[str] = None,
+    schema_version: str = "v1",
 ) -> Dict[str, Any]:
-    """
-    创建 Artifact 信封
-
-    注意：此函数只创建 artifact 部分。
-    如果需要返回给 Agent，请使用 create_artifact_response 组合 summary。
-
-    Args:
-        component_type: 组件类型
-        name: 显示标题
-        content: 数据内容
-        description: 摘要描述
-        metadata: 元信息
-        visible_to_llm: 兼容字段(已废弃)；LLM 可见内容应通过 summary 控制
-        display_in_report: 是否在报告中展示
-
-    Returns:
-        Artifact 字典
-    """
-    if isinstance(component_type, ComponentType):
-        comp_type = component_type.value
-    else:
-        comp_type = str(component_type).lower().replace("-", "_")
-
-    return {
-        "id": str(uuid4()),
-        "name": name,
-        "content": content,
-        "component_type": comp_type,
-        "description": description,
-        "metadata": metadata or {},
-        "timestamp": datetime.utcnow().isoformat(),
-        "visible_to_llm": visible_to_llm,
-        "display_in_report": display_in_report,
+    _ = visible_to_llm, source_tool
+    normalized_variant = _normalize_variant(variant)
+    wrapped_payload = {
+        "type": normalized_variant,
+        "schema_version": str(schema_version or "v1"),
+        "data": content,
     }
+    if metadata:
+        ignored_meta_keys = {"schema_id", "schemaid", "render", "variant", "type"}
+        meta = {
+            key: value
+            for key, value in dict(metadata).items()
+            if str(key).strip().lower() not in ignored_meta_keys
+        }
+        if meta:
+            wrapped_payload["meta"] = meta
+    filename, raw_bytes = write_json_artifact(
+        name=name,
+        payload=wrapped_payload,
+    )
+    descriptor = create_resource_descriptor(
+        uri=_virtual_output_path(filename),
+        name=name,
+        description=description,
+        mime_type="application/json",
+        display_in_report=display_in_report,
+    )
+    return descriptor
+
+
+def create_file_artifact_envelope(
+    name: str,
+    workspace_path: Optional[str] = None,
+    *,
+    description: str = "",
+    artifact_url: Optional[str] = None,
+    mime_type: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    visible_to_llm: bool = False,
+    display_in_report: bool = False,
+    source_tool: Optional[str] = None,
+    schema_version: str = "v1",
+) -> Dict[str, Any]:
+    _ = artifact_url, visible_to_llm, source_tool, schema_version, metadata
+    path = Path(str(workspace_path or ""))
+    filename = path.name or f"{_slugify(name)}-{uuid4().hex[:8]}"
+    descriptor = create_resource_descriptor(
+        uri=str(workspace_path or _virtual_output_path(filename)),
+        name=name,
+        description=description,
+        mime_type=mime_type or "application/octet-stream",
+        display_in_report=display_in_report,
+    )
+    return descriptor
+
+
+def create_mcp_tool_result(
+    summary: str,
+    *,
+    resources: List[Dict[str, Any]] | None = None,
+    no_data_reason: str | None = None,
+    error: Dict[str, Any] | None = None,
+    is_error: bool = False,
+) -> CallToolResult:
+    content = [TextContent(type="text", text=str(summary or "").strip())]
+    structured_resources: list[Dict[str, Any]] = []
+    for resource in resources or []:
+        structured_resources.append(_descriptor_from_envelope(resource))
+
+    structured_content: Dict[str, Any] = {"resources": structured_resources}
+    if no_data_reason:
+        structured_content["noDataReason"] = str(no_data_reason).strip()
+    if error:
+        structured_content["error"] = dict(error)
+
+    return CallToolResult(
+        content=content,
+        structuredContent=structured_content,
+        isError=is_error,
+    )
+
+
+def create_mcp_error_result(
+    summary: str,
+    *,
+    error_code: str = "INTERNAL_ERROR",
+    details: Optional[Dict[str, Any]] = None,
+) -> CallToolResult:
+    error = {"code": error_code, "message": str(summary or "").strip()}
+    if details:
+        error["details"] = dict(details)
+    return create_mcp_tool_result(
+        summary=summary,
+        resources=[],
+        error=error,
+        is_error=True,
+    )
 
 
 def create_artifact_response(
-    summary: str, artifact: Dict[str, Any]
-) -> ArtifactResponse:
-    """
-    创建标准 Artifact 返回结构
-
-    Args:
-        summary: 给 LLM 看的文本摘要
-        artifact: create_artifact_envelope 创建的字典
-    """
-    return {"summary": summary, "artifact": artifact}
+    summary: str,
+    artifact: Dict[str, Any],
+    *,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> CallToolResult:
+    _ = metadata
+    return create_mcp_tool_result(
+        summary=summary,
+        resources=[artifact],
+        is_error=False,
+    )
 
 
 def create_artifact_list_response(
-    summary: str, artifacts: List[Dict[str, Any]]
-) -> ArtifactListResponse:
-    """创建多产物返回结构."""
-    return {
-        "summary": summary,
-        "artifacts": artifacts,
-    }
+    summary: str,
+    artifacts: List[Dict[str, Any]],
+    *,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> CallToolResult:
+    _ = metadata
+    return create_mcp_tool_result(
+        summary=summary,
+        resources=list(artifacts),
+        is_error=False,
+    )
+
+
+def create_file_artifact_response(
+    summary: str,
+    *,
+    name: str,
+    workspace_path: str,
+    description: str = "",
+    mime_type: str = "application/json",
+    metadata: Optional[Dict[str, Any]] = None,
+    display_in_report: bool = True,
+) -> CallToolResult:
+    artifact = create_file_artifact_envelope(
+        name=name,
+        workspace_path=workspace_path,
+        description=description,
+        mime_type=mime_type,
+        metadata=metadata,
+        display_in_report=display_in_report,
+    )
+    return create_artifact_response(summary=summary, artifact=artifact)
 
 
 def create_chart_artifact(
@@ -155,8 +302,7 @@ def create_chart_artifact(
     name: Optional[str] = None,
     display_in_report: bool = True,
 ) -> Dict[str, Any]:
-    """统一图表 Artifact 结构."""
-    content = {
+    payload = {
         "chart_type": chart_type,
         "title": title,
         "subtitle": subtitle,
@@ -165,20 +311,19 @@ def create_chart_artifact(
         "y_label": y_label,
     }
     if extra_content:
-        content.update(extra_content)
+        payload.update(extra_content)
     if series is not None:
-        content["series"] = series
+        payload["series"] = series
     if periods is not None:
-        content["periods"] = periods
-
+        payload["periods"] = periods
     return create_artifact_envelope(
-        component_type="chart",
+        variant="chart",
         name=name or title,
-        content=content,
+        content=payload,
         description=description,
-        metadata=metadata or {"type": "chart"},
-        visible_to_llm=False,
+        metadata=metadata,
         display_in_report=display_in_report,
+        schema_version="v1",
     )
 
 
@@ -189,38 +334,32 @@ def create_table_artifact(
     tag: str = "",
     description: str = "",
 ) -> Dict[str, Any]:
-    """创建表格 Artifact"""
     return create_artifact_envelope(
-        component_type=ComponentType.TABLE,
+        variant=ResourceVariant.TABLE,
         name=title,
         content={"title": title, "tag": tag, "columns": columns, "rows": rows},
         description=description,
-        metadata={"dataset": tag},
+        schema_version="v1",
     )
 
 
 def create_symbol_error_response(
     error: Exception,
-    component_type: Union[str, ComponentType],
+    variant: Union[str, ResourceVariant],
     name: str,
-) -> Dict[str, Any]:
-    """Create a consistent response for symbol resolution errors."""
+) -> CallToolResult:
+    _ = variant, name
     message = str(error)
     details = None
     if hasattr(error, "to_dict"):
         details = error.to_dict()
         message = details.get("message") or message
     summary = f"符号解析失败: {message}"
-    content = {"error": details or {"message": message}}
-    artifact = create_artifact_envelope(
-        component_type=component_type,
-        name=name,
-        content=content,
-        description=summary,
-        visible_to_llm=True,
-        display_in_report=True,
+    return create_mcp_error_result(
+        summary,
+        error_code="SYMBOL_RESOLUTION_ERROR",
+        details=details or {"message": message},
     )
-    return create_artifact_response(summary=summary, artifact=artifact)
 
 
 def create_market_liquidity_artifact(
@@ -228,9 +367,8 @@ def create_market_liquidity_artifact(
     margin: List[Dict[str, Any]],
     description: str = "",
 ) -> Dict[str, Any]:
-    """创建市场流动性 Artifact"""
     return create_artifact_envelope(
-        component_type=ComponentType.MARKET_LIQUIDITY,
+        variant=ResourceVariant.MARKET_LIQUIDITY,
         name="Market Liquidity Data",
         content={"north_flow": north_flow, "margin": margin},
         description=description or "A-share market liquidity indicators",
@@ -243,16 +381,35 @@ def create_news_citations_artifact(
     total_count: int,
     displayed_count: int,
 ) -> Dict[str, Any]:
-    """创建新闻来源 Artifact"""
     return create_artifact_envelope(
-        component_type=ComponentType.NEWS_CITATIONS,
+        variant=ResourceVariant.NEWS_CITATIONS,
         name=f"Sources: {query[:50]}",
-        content=sources,
-        description=f"Source links for: {query}",
-        metadata={
+        content={
+            "sources": sources,
             "query": query,
             "total_count": total_count,
             "displayed_count": displayed_count,
         },
+        description=f"Source links for: {query}",
         display_in_report=False,
+        schema_version="v1",
     )
+
+
+__all__ = [
+    "ResourceVariant",
+    "create_artifact_envelope",
+    "create_artifact_list_response",
+    "create_artifact_response",
+    "create_chart_artifact",
+    "create_file_artifact_envelope",
+    "create_file_artifact_response",
+    "create_market_liquidity_artifact",
+    "create_mcp_error_result",
+    "create_mcp_tool_result",
+    "create_news_citations_artifact",
+    "create_resource_descriptor",
+    "create_symbol_error_response",
+    "create_table_artifact",
+    "write_json_artifact",
+]

@@ -15,15 +15,21 @@ Architecture:
 """
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
+from fastapi.routing import APIRoute
+from fastapi.responses import HTMLResponse
+from src.server.auth_support import is_auth_enabled, require_service_access
 from src.server.mcp.server import create_mcp_server
 from src.server.mcp.registry import get_enabled_tool_count
 from src.server.core.bootstrap import init_adapters
 from src.server.domain.symbols.errors import SymbolResolutionError
 from src.server.core.health import router as health_router
 from src.server.api.routes import (
+    code_export_router,
     market_data_router,
     filings_router,
     news_router,
@@ -135,8 +141,9 @@ def create_app():
         ```
         """,
         version="1.0.0",
-        docs_url="/docs",
-        redoc_url="/redoc",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
         lifespan=lifespan,  # Use the inner lifespan function
         openapi_tags=[
             {
@@ -147,6 +154,8 @@ def create_app():
             {"name": "Root", "description": "根路径 - 服务信息"},
         ],
     )
+
+    protected_dependencies = [Depends(require_service_access)] if is_auth_enabled() else []
 
     # 4. Add CORS middleware (允许跨域请求)
     app.add_middleware(
@@ -169,11 +178,12 @@ def create_app():
 
     # 5. Register RESTful API routes
     app.include_router(health_router, tags=["Health"])
-    app.include_router(market_data_router, tags=["Market Data"])
-    app.include_router(filings_router, prefix="/api/v1", tags=["Filings"])
-    app.include_router(news_router, tags=["News"])
-    app.include_router(fundamental_router, tags=["Fundamental"])
-    app.include_router(money_flow_router, tags=["Money Flow"])
+    app.include_router(market_data_router, tags=["Market Data"], dependencies=protected_dependencies)
+    app.include_router(filings_router, prefix="/api/v1", tags=["Filings"], dependencies=protected_dependencies)
+    app.include_router(news_router, tags=["News"], dependencies=protected_dependencies)
+    app.include_router(fundamental_router, tags=["Fundamental"], dependencies=protected_dependencies)
+    app.include_router(money_flow_router, tags=["Money Flow"], dependencies=protected_dependencies)
+    app.include_router(code_export_router, tags=["Code Export"], dependencies=protected_dependencies)
 
     logger.info("✅ RESTful API routes registered")
     logger.info("   - Health check: /health")
@@ -182,6 +192,7 @@ def create_app():
     logger.info("   - News: /api/v1/news/*")
     logger.info("   - Fundamental: /api/v1/fundamental/*")
     logger.info("   - Money Flow: /api/v1/money-flow/*")
+    logger.info("   - Code Export: /api/v1/code-export/*")
 
     # 6. Mount MCP protocol endpoint
     if mcp_app:
@@ -192,8 +203,45 @@ def create_app():
             logger.error(f"Failed to mount MCP endpoint: {e}", exc_info=True)
             logger.warning("⚠️  MCP endpoint not available, only RESTful API will work")
 
-    # 7. Add root endpoint with service information
-    @app.get("/", tags=["Root"])
+    def _build_openapi_schema() -> dict:
+        routes = [route for route in app.routes if not isinstance(route, APIRoute) or route.path != "/openapi.json"]
+        return get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=routes,
+            tags=app.openapi_tags,
+        )
+
+    # 7. Add protected documentation endpoints
+    @app.get(
+        "/openapi.json",
+        include_in_schema=False,
+        dependencies=protected_dependencies,
+    )
+    async def openapi_schema():
+        return JSONResponse(_build_openapi_schema())
+
+    @app.get(
+        "/docs",
+        include_in_schema=False,
+        dependencies=protected_dependencies,
+        response_class=HTMLResponse,
+    )
+    async def swagger_ui():
+        return get_swagger_ui_html(openapi_url="/openapi.json", title=f"{app.title} - Swagger UI")
+
+    @app.get(
+        "/redoc",
+        include_in_schema=False,
+        dependencies=protected_dependencies,
+        response_class=HTMLResponse,
+    )
+    async def redoc_ui():
+        return get_redoc_html(openapi_url="/openapi.json", title=f"{app.title} - ReDoc")
+
+    # 8. Add root endpoint with service information
+    @app.get("/", tags=["Root"], dependencies=protected_dependencies)
     async def root():
         """Get service information and available endpoints"""
         return {

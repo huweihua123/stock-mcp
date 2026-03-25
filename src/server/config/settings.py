@@ -32,8 +32,8 @@ class RedisConfig(BaseAppSettings):
 
 
 class MCPConfig(BaseAppSettings):
-    host: str = Field("0.0.0.0", validation_alias="MCP_HOST")
-    port: int = Field(8000, validation_alias="MCP_PORT")
+    host: str = Field("127.0.0.1", validation_alias="MCP_HOST")
+    port: int = Field(9898, validation_alias="MCP_PORT")
 
 
 class TushareConfig(BaseAppSettings):
@@ -72,11 +72,7 @@ class APIKeysConfig(BaseAppSettings):
     news_api: Optional[str] = Field(None, validation_alias="NEWS_API_KEY")
     tavily: Optional[str] = Field(None, validation_alias="TAVILY_API_KEY")
     fred: Optional[str] = Field(None, validation_alias="FRED_API_KEY")
-    google: Optional[str] = Field(None, validation_alias="GOOGLE_API_KEY")
     openrouter: Optional[str] = Field(None, validation_alias="OPENROUTER_API_KEY")
-
-    # Search provider configuration
-    web_search_provider: str = Field("google", validation_alias="WEB_SEARCH_PROVIDER")
 
 
 class ProxyConfig(BaseAppSettings):

@@ -15,6 +15,7 @@ from typing import Optional
 
 from src.server.core.dependencies import Container
 from src.server.utils.logger import logger
+from src.server.utils.proxy_utils import disable_global_proxy_env
 
 
 _bootstrap_lock = asyncio.Lock()
@@ -33,6 +34,8 @@ async def init_adapters() -> None:
             return
 
         logger.info("🚀 Bootstrapping application dependencies")
+
+        disable_global_proxy_env()
 
         redis = Container.redis()
         await redis.connect()

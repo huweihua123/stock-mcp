@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 from decimal import Decimal
 from fastmcp import FastMCP, Context
 
+from src.server.mcp.tools.artifact_utils import create_mcp_error_result
 from src.server.utils.logger import logger
 
 
@@ -86,7 +87,7 @@ def register_trade_tools(mcp: FastMCP):
                     f"❌ 交易执行失败: {symbol}",
                     extra={"error": str(e)}
                 )
-            return {"error": str(e)}
+            return create_mcp_error_result(str(e))
 
     @mcp.tool(tags={"trade"})
     async def get_account_balance(exchange_id: Optional[str] = None, ctx: Context = None) -> Dict[str, Any]:
@@ -126,4 +127,4 @@ def register_trade_tools(mcp: FastMCP):
                     f"❌ 获取账户余额失败",
                     extra={"error": str(e)}
                 )
-            return {"error": str(e)}
+            return create_mcp_error_result(str(e))

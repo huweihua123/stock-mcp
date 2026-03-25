@@ -9,7 +9,7 @@ Symbol/Ticker 格式说明:
 """
 
 from pydantic import BaseModel, Field, field_validator
-from typing import List, Optional
+from typing import Any, List, Optional
 
 
 class GetMultiplePricesRequest(BaseModel):
@@ -207,3 +207,35 @@ class GetFundamentalReportRequest(BaseModel):
         description="股票代码",
         examples=["AAPL", "NASDAQ:AAPL", "600519"]
     )
+
+
+class TushareCsvExportRequest(BaseModel):
+    """Code runtime CSV export request for Tushare datasets."""
+
+    api_name: str = Field(..., description="Tushare API name", examples=["index_daily", "daily", "stock_basic"])
+    kwargs: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Keyword arguments forwarded to the selected Tushare API",
+    )
+
+
+class AlphaVantageJsonExportRequest(BaseModel):
+    """Code runtime JSON export request for Alpha Vantage datasets."""
+
+    function: str = Field(..., description="Alpha Vantage function name", examples=["TIME_SERIES_DAILY", "OVERVIEW"])
+    symbol: str = Field(..., description="Ticker symbol", examples=["AAPL", "MSFT"])
+    extra_params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional Alpha Vantage query parameters",
+    )
+
+
+class CodeExportResponse(BaseModel):
+    """MCP-shaped contract for code export endpoints."""
+
+    content: list[dict[str, Any]] = Field(default_factory=list, description="MCP content blocks")
+    structuredContent: dict[str, Any] = Field(
+        default_factory=dict,
+        description="MCP structuredContent payload",
+    )
+    isError: bool = Field(default=False, description="Whether the export failed")

@@ -23,6 +23,7 @@ from src.server.core.dependencies import Container
 from src.server.mcp.tools.artifact_utils import (
     create_artifact_envelope,
     create_artifact_response,
+    create_mcp_error_result,
     create_symbol_error_response,
 )
 from src.server.domain.symbols.errors import SymbolResolutionError
@@ -123,9 +124,9 @@ def register_technical_tools(mcp: FastMCP):
                             "limit": limit,
                         },
                     )
-                return {"error": err}
+                return create_mcp_error_result(err)
 
-            result["component_type"] = "technical_indicators"
+            result["variant"] = "technical_indicators"
 
             # 构建摘要 - 只基于 rows(竞品格式)
             rows = result.get("rows") if isinstance(result.get("rows"), list) else []
@@ -201,11 +202,11 @@ def register_technical_tools(mcp: FastMCP):
             )
 
             artifact = create_artifact_envelope(
-                component_type="technical_indicators",
+                variant="technical_indicators",
                 name=name,
                 content=content,
                 description=metadata,
-                metadata={"type": "technical_indicators", "ts_code": ts_code},
+                metadata={"variant": "technical_indicators", "ts_code": ts_code},
                 visible_to_llm=False,
                 display_in_report=True,
             )
@@ -214,7 +215,7 @@ def register_technical_tools(mcp: FastMCP):
             if ctx:
                 await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
             return create_symbol_error_response(
-                e, component_type="technical_indicators", name=f"{symbol} 技术指标"
+                e, variant="technical_indicators", name=f"{symbol} 技术指标"
             )
         except Exception as e:
             error_msg = f"MCP tool error in calculate_technical_indicators: {e}"
@@ -226,7 +227,7 @@ def register_technical_tools(mcp: FastMCP):
                     f"❌ 技术指标计算失败: {symbol}", extra={"error": str(e)}
                 )
 
-            return {"error": str(e)}
+            return create_mcp_error_result(str(e))
 
     @mcp.tool(tags={"technical"})
     async def get_technical_indicators(
@@ -253,7 +254,7 @@ def register_technical_tools(mcp: FastMCP):
             result = await technical_use_cases.calculate_technical_indicators(
                 symbol, "30d", "1d", limit
             )
-            result["component_type"] = "technical_indicators"
+            result["variant"] = "technical_indicators"
             result["ts_code"] = to_ts_code(symbol) if "." in symbol else await _resolve_ts_code(symbol)
 
             content = result.get("rows") if isinstance(result.get("rows"), list) else result
@@ -303,11 +304,11 @@ def register_technical_tools(mcp: FastMCP):
             )
 
             artifact = create_artifact_envelope(
-                component_type="technical_indicators",
+                variant="technical_indicators",
                 name=f"Technical Indicators: {result['ts_code']}",
                 content=content,
                 description=description,
-                metadata={"type": "technical_indicators", "ts_code": result["ts_code"]},
+                metadata={"variant": "technical_indicators", "ts_code": result["ts_code"]},
                 visible_to_llm=False,
                 display_in_report=True,
             )
@@ -316,7 +317,7 @@ def register_technical_tools(mcp: FastMCP):
             if ctx:
                 await ctx.warning(f"⚠️ 符号解析失败: {ts_code}", extra=e.to_dict())
             return create_symbol_error_response(
-                e, component_type="technical_indicators", name=f"{ts_code} 技术指标"
+                e, variant="technical_indicators", name=f"{ts_code} 技术指标"
             )
         except Exception as e:
             logger.error(f"Get technical indicators failed: {e}", exc_info=True)
@@ -324,7 +325,7 @@ def register_technical_tools(mcp: FastMCP):
                 await ctx.error(
                     f"❌ 获取技术指标失败: {ts_code}", extra={"error": str(e)}
                 )
-            return {"error": str(e)}
+            return create_mcp_error_result(str(e))
 
     async def analyze_price_patterns(
         symbol: str, period: str = "90d", ctx: Context = None
@@ -354,7 +355,7 @@ def register_technical_tools(mcp: FastMCP):
             result = await technical_use_cases.analyze_price_patterns(
                 symbol=symbol, period=period
             )
-            result["component_type"] = "price_patterns"
+            result["variant"] = "price_patterns"
 
             # 构建描述
             patterns = result.get("patterns", [])
@@ -366,7 +367,7 @@ def register_technical_tools(mcp: FastMCP):
                 await ctx.info(f"✅ 价格形态分析完成: {symbol}")
 
             artifact = create_artifact_envelope(
-                component_type="price_patterns",
+                variant="price_patterns",
                 name=f"{symbol} 价格形态",
                 content=result,
                 description=description,
@@ -379,7 +380,7 @@ def register_technical_tools(mcp: FastMCP):
             if ctx:
                 await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
             return create_symbol_error_response(
-                e, component_type="price_patterns", name=f"{symbol} 价格形态"
+                e, variant="price_patterns", name=f"{symbol} 价格形态"
             )
         except Exception as e:
             logger.error(f"Analyze price patterns failed: {e}")
@@ -387,7 +388,7 @@ def register_technical_tools(mcp: FastMCP):
                 await ctx.error(
                     f"❌ 价格形态分析失败: {symbol}", extra={"error": str(e)}
                 )
-            return {"error": str(e)}
+            return create_mcp_error_result(str(e))
 
     async def calculate_support_resistance(
         symbol: str, period: str = "90d", ctx: Context = None
@@ -420,7 +421,7 @@ def register_technical_tools(mcp: FastMCP):
             result = await technical_use_cases.calculate_support_resistance(
                 symbol=symbol, period=period
             )
-            result["component_type"] = "support_resistance"
+            result["variant"] = "support_resistance"
 
             # 构建描述
             supports = result.get("supports", [])
@@ -434,7 +435,7 @@ def register_technical_tools(mcp: FastMCP):
                 await ctx.info(f"✅ 支撑/阻力位计算完成: {symbol}")
 
             artifact = create_artifact_envelope(
-                component_type="support_resistance",
+                variant="support_resistance",
                 name=f"{symbol} 支撑/阻力位",
                 content=result,
                 description=description,
@@ -447,7 +448,7 @@ def register_technical_tools(mcp: FastMCP):
             if ctx:
                 await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
             return create_symbol_error_response(
-                e, component_type="support_resistance", name=f"{symbol} 支撑/阻力位"
+                e, variant="support_resistance", name=f"{symbol} 支撑/阻力位"
             )
         except Exception as e:
             logger.error(f"Calculate support/resistance failed: {e}")
@@ -455,7 +456,7 @@ def register_technical_tools(mcp: FastMCP):
                 await ctx.error(
                     f"❌ 支撑/阻力位计算失败: {symbol}", extra={"error": str(e)}
                 )
-            return {"error": str(e)}
+            return create_mcp_error_result(str(e))
 
     async def analyze_volume_profile(
         symbol: str, period: str = "90d", ctx: Context = None
@@ -486,7 +487,7 @@ def register_technical_tools(mcp: FastMCP):
             result = await technical_use_cases.analyze_volume_profile(
                 symbol=symbol, period=period
             )
-            result["component_type"] = "volume_profile"
+            result["variant"] = "volume_profile"
 
             # 构建描述
             poc = result.get("poc_price", 0)
@@ -498,7 +499,7 @@ def register_technical_tools(mcp: FastMCP):
                 await ctx.info(f"✅ 成交量分布分析完成: {symbol}")
 
             artifact = create_artifact_envelope(
-                component_type="volume_profile",
+                variant="volume_profile",
                 name=f"{symbol} 成交量分布",
                 content=result,
                 description=description,
@@ -511,7 +512,7 @@ def register_technical_tools(mcp: FastMCP):
             if ctx:
                 await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
             return create_symbol_error_response(
-                e, component_type="volume_profile", name=f"{symbol} 成交量分布"
+                e, variant="volume_profile", name=f"{symbol} 成交量分布"
             )
         except Exception as e:
             logger.error(f"Analyze volume profile failed: {e}")
@@ -519,4 +520,4 @@ def register_technical_tools(mcp: FastMCP):
                 await ctx.error(
                     f"❌ 成交量分布分析失败: {symbol}", extra={"error": str(e)}
                 )
-            return {"error": str(e)}
+            return create_mcp_error_result(str(e))

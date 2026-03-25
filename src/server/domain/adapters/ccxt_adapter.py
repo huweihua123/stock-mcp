@@ -26,10 +26,16 @@ from src.server.utils.logger import logger
 class CCXTAdapter(BaseDataAdapter):
     name = "ccxt"
 
-    def __init__(self, cache, default_exchange_id: str = "binance"):
+    def __init__(
+        self,
+        cache,
+        default_exchange_id: str = "binance",
+        proxy_url: Optional[str] = None,
+    ):
         super().__init__(DataSource.CCXT)
         self.cache = cache
         self.default_exchange_id = default_exchange_id
+        self.proxy_url = proxy_url
         self._exchange_instances: Dict[str, ccxt.Exchange] = {}
         self.logger = logger
 
@@ -42,10 +48,14 @@ class CCXTAdapter(BaseDataAdapter):
             raise ValueError(f"Exchange {exchange_id} not supported by CCXT")
 
         exchange_class = getattr(ccxt, exchange_id)
-        exchange = exchange_class({
+        config = {
             "enableRateLimit": True,
-            "options": {"defaultType": "spot"}  # Default to spot for data fetching
-        })
+            "options": {"defaultType": "spot"},
+        }
+        if self.proxy_url:
+            config["aiohttp_proxy"] = self.proxy_url
+
+        exchange = exchange_class(config)
         
         # Load markets to ensure we can validate symbols
         await exchange.load_markets()

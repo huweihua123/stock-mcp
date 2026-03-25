@@ -19,6 +19,10 @@ from src.server.domain.cninfo_helper import (
     _normalize_stock_code,
     fetch_cninfo_data,
 )
+from src.server.domain.sector_matching import (
+    pick_sector_resolution,
+    rank_sector_candidates,
+)
 from src.server.domain.types import (
     AdapterCapability,
     Asset,
@@ -164,34 +168,26 @@ class AkshareAdapter(BaseDataAdapter):
     async def _resolve_board(
         self, sector_name: str
     ) -> tuple[Optional[Dict[str, str]], Optional[List[str]]]:
-        """Resolve board by exact/fuzzy matching."""
+        """Resolve board by token recall + scoring."""
         catalog = await self._get_board_catalog()
         if not catalog:
             return None, None
 
-        exact = [x for x in catalog if x["name"] == sector_name]
-        if len(exact) == 1:
-            return exact[0], None
-        if len(exact) > 1:
-            return exact[0], None
-
-        contains = [x for x in catalog if sector_name and sector_name in x["name"]]
-        if len(contains) == 1:
-            return contains[0], None
-        if len(contains) > 1:
-            return None, [x["name"] for x in contains[:10]]
-
-        reverse = [
-            x
-            for x in catalog
-            if len(x["name"]) >= 2 and x["name"] in sector_name
-        ]
-        if len(reverse) == 1:
-            return reverse[0], None
-        if len(reverse) > 1:
-            reverse_sorted = sorted(reverse, key=lambda x: len(x["name"]), reverse=True)
-            return reverse_sorted[0], None
-
+        ranked = rank_sector_candidates(
+            sector_name,
+            catalog,
+            name_getter=lambda row: str(row.get("name", "")),
+            top_k=20,
+        )
+        winner, candidate_names = pick_sector_resolution(
+            sector_name,
+            ranked,
+            ambiguous_top_k=10,
+        )
+        if winner is not None:
+            return winner.item, None
+        if candidate_names:
+            return None, candidate_names
         return None, None
 
     async def _resolve_board_by_code(self, sector_id: str) -> Optional[Dict[str, str]]:
@@ -214,7 +210,7 @@ class AkshareAdapter(BaseDataAdapter):
         query = (query_text or "").strip()
         if not query:
             return {
-                "component_type": "sector_resolve",
+                "variant": "sector_resolve",
                 "source": "akshare",
                 "status": "not_found",
                 "query_text": query_text,
@@ -225,7 +221,7 @@ class AkshareAdapter(BaseDataAdapter):
         board = await self._resolve_board_by_code(query)
         if board:
             return {
-                "component_type": "sector_resolve",
+                "variant": "sector_resolve",
                 "source": "akshare",
                 "status": "resolved",
                 "query_text": query_text,
@@ -238,7 +234,7 @@ class AkshareAdapter(BaseDataAdapter):
         board, candidates = await self._resolve_board(query)
         if board:
             return {
-                "component_type": "sector_resolve",
+                "variant": "sector_resolve",
                 "source": "akshare",
                 "status": "resolved",
                 "query_text": query_text,
@@ -263,7 +259,7 @@ class AkshareAdapter(BaseDataAdapter):
                     }
                 )
             return {
-                "component_type": "sector_resolve",
+                "variant": "sector_resolve",
                 "source": "akshare",
                 "status": "ambiguous",
                 "query_text": query_text,
@@ -272,7 +268,7 @@ class AkshareAdapter(BaseDataAdapter):
             }
 
         return {
-            "component_type": "sector_resolve",
+            "variant": "sector_resolve",
             "source": "akshare",
             "status": "not_found",
             "query_text": query_text,
@@ -550,7 +546,7 @@ class AkshareAdapter(BaseDataAdapter):
             )
             if df is None or df.empty:
                 result = {
-                    "component_type": "market_money_flow",
+                    "variant": "market_money_flow",
                     "source": "akshare",
                     "data_source": "stock_sector_fund_flow_rank",
                     "data": [],
@@ -650,7 +646,7 @@ class AkshareAdapter(BaseDataAdapter):
                     blocked_reason = "insufficient_rank_data"
 
             result = {
-                "component_type": "market_money_flow",
+                "variant": "market_money_flow",
                 "source": "akshare",
                 "data_source": "stock_sector_fund_flow_rank",
                 "data": rows,
@@ -695,6 +691,10 @@ class AkshareAdapter(BaseDataAdapter):
         candidates = None
         if query_sector_id:
             board = await self._resolve_board_by_code(query_sector_id)
+            # Cross-adapter fallback: if sector_id dialect mismatches AkShare
+            # (e.g. tushare 877042.TI), retry by sector_name.
+            if board is None and query_name:
+                board, candidates = await self._resolve_board(query_name)
         else:
             board, candidates = await self._resolve_board(query_name)
 
@@ -705,7 +705,7 @@ class AkshareAdapter(BaseDataAdapter):
                     "candidates": candidates,
                     "sector_name": query_name,
                     "sector_id": query_sector_id,
-                    "component_type": "sector_trend",
+                    "variant": "sector_trend",
                     "source": "akshare",
                 }
             if query_sector_id:
@@ -739,7 +739,7 @@ class AkshareAdapter(BaseDataAdapter):
                 )
 
             result = {
-                "component_type": "sector_trend",
+                "variant": "sector_trend",
                 "source": "akshare",
                 "sector_name": board["name"],
                 "index_code": board.get("code", ""),
@@ -775,6 +775,10 @@ class AkshareAdapter(BaseDataAdapter):
         candidates = None
         if query_sector_id:
             board = await self._resolve_board_by_code(query_sector_id)
+            # Cross-adapter fallback: if sector_id dialect mismatches AkShare
+            # (e.g. tushare 877042.TI), retry by sector_name.
+            if board is None and query_name:
+                board, candidates = await self._resolve_board(query_name)
         else:
             board, candidates = await self._resolve_board(query_name)
 
@@ -785,7 +789,7 @@ class AkshareAdapter(BaseDataAdapter):
                     "candidates": candidates,
                     "sector_name": query_name,
                     "sector_id": query_sector_id,
-                    "component_type": "sector_flow",
+                    "variant": "sector_flow",
                     "source": "akshare",
                 }
             if query_sector_id:
@@ -793,13 +797,13 @@ class AkshareAdapter(BaseDataAdapter):
                     "error": f"未找到板块ID: {query_sector_id}",
                     "sector_name": query_name,
                     "sector_id": query_sector_id,
-                    "component_type": "sector_flow",
+                    "variant": "sector_flow",
                     "source": "akshare",
                 }
             return {
                 "error": f"未找到板块: {query_name}",
                 "sector_name": query_name,
-                "component_type": "sector_flow",
+                "variant": "sector_flow",
                 "source": "akshare",
             }
 
@@ -861,7 +865,7 @@ class AkshareAdapter(BaseDataAdapter):
                 trend = "仅行情数据"
 
             result = {
-                "component_type": "sector_money_flow",
+                "variant": "sector_money_flow",
                 "source": "akshare",
                 "sector_name": board["name"],
                 "index_code": board.get("code", ""),
@@ -910,7 +914,7 @@ class AkshareAdapter(BaseDataAdapter):
             ]
 
             result = {
-                "component_type": "north_bound_flow",
+                "variant": "north_bound_flow",
                 "source": "akshare",
                 "data": {
                     "dates": dates,
@@ -992,7 +996,7 @@ class AkshareAdapter(BaseDataAdapter):
                 )
 
             result = {
-                "component_type": "market_liquidity",
+                "variant": "market_liquidity",
                 "source": "akshare",
                 "data": {
                     "north_flow": north_flow,

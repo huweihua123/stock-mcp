@@ -1,534 +1,324 @@
-# Stock Tool MCP Server
+# Stock MCP
 
 <div align="center">
 
-**[English](#english-documentation) | 中文文档**
+**[English](#english) | 中文**
 
-一个强大且全面的模型上下文协议 (MCP) 服务器，专注于金融市场数据、技术分析和基本面研究。
+开源金融数据 MCP / HTTP 服务，面向 AI Agent、量化脚本和普通后端集成。
 
 </div>
 
----
+## 中文
 
-## 🇨🇳 中文文档
+### 这是什么
 
-### 📖 项目简介
+`stock-mcp` 是一个开源金融数据服务，提供两套对外接口：
 
-本项目旨在为 AI Agent（如 Claude, Cursor, 通义千问等）赋予专业级的股市分析能力，打通大语言模型与实时金融数据之间的桥梁。
+- `MCP`：给 Claude Desktop、Cursor、DeerFlow、各类 Agent 使用
+- `HTTP API`：给普通后端、脚本和服务直接调用
 
-通过 **MCP (Model Context Protocol)** 协议，AI 可以直接调用本服务器提供的金融工具，实现：
-- 📊 实时行情查询
-- 📈 技术指标计算
-- 💰 基本面分析
-- 📰 新闻资讯获取
-- 🔍 深度研究报告
+它的定位不是“给投资建议”，而是提供：
 
-### 🚀 核心功能
+- 稳定的数据源接入
+- 标准化的金融工具能力
+- 适合 Agent 使用的 MCP tool / artifact 输出
+- 适合代码执行工作流的 CSV / JSON 数据导出
 
-#### 1. 多源市场数据融合
+### 一键启动
 
-无需纠结使用哪个 API。本服务器内置智能 **Adapter Manager（适配器管理器）**，可自动路由请求并在多个数据源之间进行故障转移：
-
-- **美股**: Yahoo Finance, Finnhub
-- **A股**: Akshare, Tushare, Baostock
-- **加密货币**: CCXT (Binance, OKX 等)
-- **外汇与指数**: Yahoo Finance
-
-#### 2. 专业技术分析
-
-内置量化分析引擎，提供的不仅仅是原始数字：
-
-- **技术指标**: SMA/EMA, RSI, MACD, 布林带 (Bollinger Bands), KDJ, ATR 等
-- **形态识别**: 自动检测 K 线形态（如十字星 Doji, 锤头线 Hammer, 吞没形态 Engulfing）
-- **支撑与压力**: 动态计算关键价格位
-- **筹码分布 (Volume Profile)**: 分析成交量分布以识别价值区域
-
-#### 3. 深度基本面研究
-
-自动化的金融分析师能力：
-
-- **财务报表**: 资产负债表、利润表、现金流量表
-- **健康度打分**: 基于盈利能力、偿债能力、成长性和估值的 0-100 分独家健康度评分
-- **关键比率**: PE, PB, ROE, ROA, 负债权益比等
-
-#### 4. 智能聚合工具
-
-专为 LLM 上下文窗口优化：
-
-- `perform_deep_research`: 一键获取指定标的的 价格 + 历史走势 + 基本面 + 近期新闻
-- `get_market_report`: 获取当前市场状态的综合快照
-
-### 🛠️ 安装指南
-
-#### 前置要求
-
-- Python 3.10+
-- Redis (可选，用于缓存)
-
-#### 安装步骤
-
-1. **克隆仓库**
-   ```bash
-   git clone https://github.com/yourusername/stock-tool-mcp.git
-   cd stock-tool-mcp
-   ```
-
-2. **创建并激活 Conda 环境**
-   ```bash
-   # 创建 Python 3.11.14 环境
-   conda create -n stock-mcp python=3.11.14
-   
-   # 激活环境
-   conda activate stock-mcp
-   ```
-
-3. **安装依赖**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **配置环境变量**
-   
-   复制示例环境变量文件:
-   ```bash
-   cp .env.example .env
-   ```
-   
-   编辑 `.env` 添加你的 API 密钥（可选，但推荐以获得更高限额）:
-   - `TUSHARE_ENABLED` - 是否启用 Tushare 数据源（默认 False）
-   - `TUSHARE_TOKEN` - 用于 A 股数据（[获取 Token](https://tushare.pro/register)）
-   - `TUSHARE_HTTP_URL` - 可选，自定义 Tushare 接口地址（私有部署/镜像）
-   - `FINNHUB_ENABLED` - 是否启用 Finnhub 数据源（默认 False）
-   - `FINNHUB_API_KEY` - 用于美股机构数据（[获取 API Key](https://finnhub.io/)）
-   - `FRED_API_KEY` - 用于美股宏观指标（GDP/CPI/失业率/利率，免费申请，[获取 API Key](https://fred.stlouisfed.org/docs/api/api_key.html)）
-   - `DASHSCOPE_API_KEY` - 用于阿里百炼 AI（可选，用于测试）
-
-   > **💡 提示**: 本项目采用**可插拔设计**。如果没有配置 API Key，系统会自动禁用相应的数据源，并使用免费的替代方案（如 Akshare, Baostock, Yahoo Finance）作为后备。
-
-### 🏃‍♂️ 使用方法
-
-#### 方式一：作为 HTTP 服务器运行（推荐用于测试和开发）
-
-使用 uvicorn 启动 MCP 服务器（Streamable HTTP 模式）：
+如果你只是想先把服务跑起来，最短路径就是：
 
 ```bash
-# 设置环境变量指定传输方式为 streamable-http
-export MCP_TRANSPORT=streamable-http
-
-# 标准启动（监听 9898 端口）
-python -m uvicorn src.server.app:app --host 0.0.0.0 --port 9898
-
-# 开发模式（支持热重载）
-MCP_TRANSPORT=streamable-http python -m uvicorn src.server.app:app --reload --port 9898
+git clone https://github.com/yourusername/stock-mcp.git
+cd stock-mcp
+cp .env.example .env
+docker compose up -d --build
 ```
 
-启动成功后，你会看到：
+启动后默认可访问：
+
+- `http://127.0.0.1:9898/health`
+- `http://127.0.0.1:9898/docs`
+- `http://127.0.0.1:9898/mcp`
+
+默认 Docker 栈会一起启动：
+
+- `stock-mcp`
+- `redis`
+- `postgres`
+
+默认端口：
+
+- `stock-mcp`: `127.0.0.1:9898`
+- `postgres`: `127.0.0.1:15432`
+
+说明：
+
+- `15432` 是为了避免占用你本机已有的 `5432`
+- 容器内部仍然使用 `postgres:5432`
+- 如果你想修改宿主机映射端口，改 `DOCKER_POSTGRES_PORT` 即可
+
+### 核心功能
+
+#### 1. 市场数据
+
+- A 股、美股、ETF、指数、加密资产行情
+- 日线 / 分时 / K 线数据
+- 多市场 ticker 解析与标准化
+- 多数据源回退
+
+#### 2. 技术分析
+
+- RSI、MACD、均线、布林带等常见指标
+- K 线形态识别
+- 支撑 / 压力位分析
+- 趋势与动量辅助分析
+
+#### 3. 基本面与研究
+
+- 估值与基础财务指标
+- 美股宏观和行业研究工具
+- 基于 Tavily 的统一新闻检索
+- 资金流与筹码分布
+
+#### 4. 公告与文档
+
+- SEC / EDGAR filings
+- A 股公告处理
+- 文档 chunk / markdown / 结构化提取
+
+#### 5. Agent / Code Workflow 友好能力
+
+- MCP tools 统一注册
+- MCP artifact 减载，避免把大 blob 直接塞进模型上下文
+- `code-export` HTTP 接口，可直接导出 CSV / JSON 给代码执行型 agent
+
+### 支持的主要数据源
+
+国内源：
+
+- `Tushare`
+- `Akshare`
+- `Baostock`
+
+国外源：
+
+- `Yahoo / yfinance`
+- `Finnhub`
+- `Alpha Vantage`
+- `Twelve Data`
+- `FRED`
+- `CCXT`
+- `Crypto`
+- `EDGAR`
+
+### HTTP API 能做什么
+
+当前 HTTP 路由主要分为这些组：
+
+- `/api/v1/market/*`
+  - 行情、K 线、技术指标、市场数据查询
+- `/api/v1/fundamental/*`
+  - 基本面与估值
+- `/api/v1/money-flow/*`
+  - 资金流分析
+- `/api/v1/news/*`
+  - 统一新闻检索与个股新闻搜索
+- `/api/v1/filings/*`
+  - SEC / A 股公告与文档处理
+- `/api/v1/code-export/*`
+  - 面向代码执行工作流的数据导出
+- `/health`
+  - 健康检查
+- `/docs` / `/redoc`
+  - OpenAPI 文档
+
+也就是说，这个项目不是只有 MCP。
+
+如果你不打算接 MCP 客户端，完全可以只把它当普通 HTTP 服务来用。
+
+### MCP 能做什么
+
+MCP 侧会把这些能力暴露成 tools，主要对应：
+
+- 行情和资产查询
+- 技术分析
+- 基本面与行业研究
+- 新闻与事件
+  - 当前统一走 Tavily 检索，不再保留 adapter 原生新闻分支
+- 资金流与筹码
+- 公告与文档处理
+
+MCP 入口：
+
+- `POST /mcp`
+
+适用场景：
+
+- Claude Desktop
+- Cursor
+- DeerFlow
+- 其他支持 MCP 的 Agent 平台
+
+### 大体架构
+
+```text
+                +-----------------------------+
+                |        MCP Clients          |
+                | Claude / Cursor / DeerFlow  |
+                +--------------+--------------+
+                               |
+                               v
+                        /mcp (MCP / JSON-RPC)
+
+                +-----------------------------+
+                |         stock-mcp           |
+                |  FastAPI + FastMCP server   |
+                +-----------------------------+
+                  |           |            |
+                  |           |            |
+                  v           v            v
+              REST API    MCP Tools   Code Export
+             /api/v1/*      /mcp      CSV / JSON
+
+                  |
+                  v
+      +-------------------------------------------+
+      | Domain Services / Adapter Manager / Router |
+      +-------------------------------------------+
+          |         |         |         |        |
+          v         v         v         v        v
+      Tushare   Akshare   Baostock   Yahoo   Finnhub ...
+
+                  |
+                  v
+             Redis / Postgres
 ```
-✅ MCP server ready!
-```
 
-**使用示例（Streamable HTTP）**：
+职责分层大致是：
 
-![查询贵州茅台价格 - HTTP 模式](docs/query_maotao_streamablehttp.png)
+- `src/server/api/`
+  - FastAPI 路由
+- `src/server/mcp/`
+  - MCP server、tool registry、tool envelope
+- `src/server/domain/`
+  - adapter、service、router、symbol 逻辑
+- `src/server/infrastructure/`
+  - Redis、Postgres、外部连接
+- `src/server/core/`
+  - 依赖注入、启动流程、配置
 
-#### 方式二：使用 stdio 模式（推荐用于 AI Agent 集成）
+### 认证模式
 
-stdio 模式通过标准输入输出与 AI Agent 通信，适合 Claude Desktop、Cursor 等本地集成。
+`stock-mcp` 支持三档认证：
 
-**快速启动**：
+#### 1. `none`
+
+- 本地开发 / 开源试用默认模式
+- 不做鉴权
+- 推荐只监听 `127.0.0.1`
+
+#### 2. `token`
+
+- 适合个人部署或内网服务
+- 所有受保护路径统一使用静态 Bearer token
+
+#### 3. `jwt`
+
+- 适合生产和平台集成
+- 基于 `JWTVerifier + OIDC / JWKS`
+- 不绑定 Keycloak，兼容任意 OIDC/JWT IdP
+
+在 `token` 和 `jwt` 模式下：
+
+- `/health` 匿名开放
+- `/mcp`、`/api/v1/*`、`/docs`、`/redoc`、`/openapi.json`、`/` 需要 Bearer token
+
+### 代理规则
+
+当前项目采用“国外源显式代理，国内源直连”的边界：
+
+显式走代理：
+
+- `Yahoo / yfinance`
+- `Finnhub`
+- `Futures`
+- `Alpha Vantage`
+- `Twelve Data`
+- `FRED`
+- `CCXT`
+- `Crypto`
+- `EDGAR`
+
+保持直连：
+
+- `Tushare`
+- `Akshare`
+- `Baostock`
+
+Docker 下默认会把：
+
+- `PROXY_HOST`
+
+覆盖成：
+
+- `host.docker.internal`
+
+这样容器里的国外源可以访问宿主机代理。  
+如果你的代理不在宿主机上，可以改：
+
+- `DOCKER_PROXY_HOST`
+
+### 本地运行方式
+
+#### 1. uv 本地运行
+
 ```bash
-# 使用启动脚本（已配置好 conda 环境）
-bash start_stock_mcp_stdio.sh
+uv sync --dev
+cp .env.example .env
+
+export STOCK_MCP_AUTH_MODE=none
+uv run python -m uvicorn src.server.app:app --host 127.0.0.1 --port 9898
 ```
 
-**手动启动**：
-```bash
-# 激活 conda 环境
-conda activate stock-mcp
-
-# 启动 stdio 模式（默认传输方式）
-python -c "import src.server.mcp.server as m; m.create_mcp_server().run(transport='stdio')"
-```
-
-**集成到 Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
-```json
-{
-  "mcpServers": {
-    "stock-tools": {
-      "command": "bash",
-      "args": ["start_stock_mcp_stdio.sh"],
-      "cwd": "/path/to/stock-tool-mcp"
-    }
-  }
-}
-```
-
-**集成到 Cursor** (`.cursor/mcp_config.json`):
-```json
-{
-  "mcpServers": {
-    "stock-tools": {
-      "command": "bash",
-      "args": ["start_stock_mcp_stdio.sh"],
-      "cwd": "/path/to/stock-tool-mcp"
-    }
-  }
-}
-```
-
-**使用示例（stdio 模式）**：
-
-![查询贵州茅台价格 - stdio 模式](docs/query_maotao_stdio.png)
-
-#### 方式三：通过 HTTP API 调用
-
-服务器启动后，可以通过 HTTP 接口调用（Streamable HTTP 协议）：
+#### 2. Docker Compose 运行
 
 ```bash
-# 列出所有可用工具
-curl -X POST http://localhost:9898 \
+cp .env.example .env
+docker compose up -d --build
+```
+
+如果你切换过数据库配置或旧卷和当前配置不一致，建议首次执行：
+
+```bash
+docker compose down -v
+docker compose up -d --build
+```
+
+#### 3. stdio MCP
+
+```bash
+uv run python -c "import src.server.mcp.server as m; m.create_mcp_server().run(transport='stdio')"
+```
+
+### 调用示例
+
+#### HTTP API 示例
+
+```bash
+curl -X POST http://127.0.0.1:9898/api/v1/market/indicators/calculate \
   -H "Content-Type: application/json" \
   -d '{
-    "jsonrpc": "2.0",
-    "method": "tools/list",
-    "params": {},
-    "id": "1"
-  }'
-
-# 调用工具示例：查询贵州茅台价格
-curl -X POST "http://localhost:9898/?_tool=get_kline_data" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "method": "tools/call",
-    "params": {
-      "name": "get_kline_data",
-      "arguments": {
-        "ticker": "SSE:600519"
-      }
-    },
-    "id": "2"
+    "symbol": "SSE:600519",
+    "period": "6mo",
+    "interval": "1d"
   }'
 ```
 
-### 🧰 可用工具一览
-
-> 实际启用的工具以 MCP 注册表为准（`src/server/mcp/registry.py`）。
-
-| 工具名称                         | 描述                                   | 示例参数                                                                         |
-| -------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------- |
-| `search_assets`                  | 通过名称或代码搜索股票、加密货币或 ETF | `{"query": "茅台", "limit": 5}`                                                  |
-| `get_kline_data`          | 获取指定日期范围的 OHLCV 数据          | `{"ticker": "SSE:600519", "start_date": "2024-01-01", "end_date": "2024-12-31"}` |
-| `get_technical_indicators` | 计算技术指标 (RSI, MACD 等)            | `{"symbol": "SSE:600519", "period": "90d", "interval": "1d"}`                    |
-| `get_financial_reports`          | 财务图表（营收/净利润）                | `{"symbol": "SSE:600519"}`                                                       |
-| `get_mainbz_info`                | 主营业务构成                           | `{"symbol": "SSE:600519"}`                                                       |
-| `get_shareholder_info`           | 股东信息                               | `{"symbol": "SSE:600519"}`                                                       |
-| `get_dividend_info`              | 分红送股历史                           | `{"symbol": "SSE:600519"}`                                                       |
-| `get_money_flow`                 | 个股资金流向                           | `{"symbol": "SSE:600519", "days": 20}`                                           |
-| `get_north_bound_flow`           | 北向资金流向                           | `{"days": 30}`                                                                   |
-| `get_macro_data`                 | 宏观数据（CPI/PPI/M2/GDP）             | `{"indicators": "CPI,PPI,M2,GDP"}`                                               |
-
-> **💡 重要提示**: 
-> - A股股票代码格式：`SSE:600519`（上交所）、`SZSE:000001`（深交所）
-> - 美股股票代码格式：`NASDAQ:AAPL`、`NYSE:TSLA`
-> - 加密货币格式：`CRYPTO:BTC`、`CRYPTO:ETH`
-
-### 📸 实际使用示例
-
-本项目支持两种传输协议，分别适用于不同场景：
-
-#### 1. Streamable HTTP 模式
-适合通过 HTTP 接口调用，方便测试和集成到 Web 应用：
-
-![查询贵州茅台价格 - HTTP 模式](docs/query_maotao_streamablehttp.png)
-
-#### 2. stdio 模式
-适合直接集成到 AI Agent（如 Claude Desktop、Cursor），通过标准输入输出通信：
-
-![查询贵州茅台价格 - stdio 模式](docs/query_maotao_stdio.png)
-
-> **💡 两种模式的区别**：
-> - **Streamable HTTP**: 需要启动 Web 服务器，支持远程调用，适合生产环境
-> - **stdio**: 直接进程通信，无需网络端口，适合本地 AI Agent 集成，延迟更低
-
-### 🧪 测试脚本
-
-项目提供了完整的测试脚本，帮助你快速验证功能：
-
-#### 1. HTTP 接口测试
-
-使用 `scripts/test_mcp_refactor.py` 做快速自检（MCP + REST）：
+#### MCP 示例
 
 ```bash
-# 1. 启动 MCP 服务器（在一个终端）
-python -m uvicorn src.server.app:app --host 0.0.0.0 --port 9898
-
-# 2. 在另一个终端运行测试脚本
-NO_PROXY=localhost,127.0.0.1 python scripts/test_mcp_refactor.py
-```
-
-该脚本会：
-- ✅ 连接到 MCP 服务器（http://localhost:9898）
-- ✅ 列出所有可用工具
-- ✅ 使用阿里百炼（通义千问）调用工具
-- ✅ 查询贵州茅台的价格和基本面
-
-#### 2. OpenAPI 文档生成
-
-使用 `scripts/mcp2openapi.py` 生成 OpenAPI 规范文档：
-
-```bash
-python scripts/mcp2openapi.py
-```
-
-生成的 OpenAPI 文档可以导入到 Apifox、Postman 等工具中进行测试。
-
-### 🗺️ 路线图与未来计划
-
-虽然当前的数据检索和分析能力已相当健壮，但以下功能计划在未来版本中支持：
-
-- [ ] **实盘交易执行**: 目前 `execute_order` 工具处于 **模拟模式 (Simulation Mode)**。我们计划通过 CCXT（加密货币）和券商 API（股票）集成真实的交易下单能力
-- [ ] **高级缓存策略**: 实现更细粒度的 TTL (Time-To-Live) 设置，区分实时价格数据（短 TTL）和财务报表（长 TTL），以平衡性能与 API 配额消耗
-- [ ] **用户账户管理**: 安全地管理用户特定的交易所 API 密钥，实现个性化交易
-- [ ] **更多数据适配器**: 扩展支持更多专业数据源（如情绪分析提供商、另类数据等）
-- [ ] **WebSocket 实时推送**: 支持实时行情推送，减少轮询开销
-- [ ] **回测引擎**: 内置策略回测功能，验证交易策略的有效性
-
-### 🏗️ 项目架构
-
-本项目采用 **DDD + 分层架构**，并同时支持 REST 与 MCP 两种协议入口。
-
-```
-src/server/
-├── app.py                 # FastAPI + MCP 入口
-├── api/                   # REST API 层（routes + request models）
-├── mcp/                   # MCP 协议层
-│   ├── registry.py        # MCP 工具注册表（单一来源）
-│   └── tools/             # MCP 工具定义
-├── core/                  # 应用层（启动、DI、用例编排）
-│   ├── bootstrap.py        # 启动初始化（连接/适配器注册）
-│   ├── dependencies.py     # 依赖注入容器
-│   └── use_cases/          # 统一业务用例（MCP/REST 共享）
-├── domain/                # 领域层（核心能力）
-│   ├── market_gateway.py   # 统一网关（解析 + 路由入口）
-│   ├── adapter_manager.py  # 多源适配管理与 failover
-│   ├── adapters/          # 数据适配器（Akshare/Tushare/Baostock/Yahoo/Finnhub/CCXT/TwelveData）
-│   ├── symbols/           # 符号标准化（EXCHANGE:SYMBOL）
-│   ├── routing/           # 路由策略 + 健康跟踪 + 冷却
-│   └── security_master/   # 资产主数据（listing/alias/identifier/provider_symbol）
-├── infrastructure/        # 基础设施层
-│   ├── connections/       # Redis/Postgres/Tushare/Finnhub/Baostock 连接
-│   └── cache/             # 缓存封装
-├── config/                # 配置与策略（settings/routing_policy/aliases_seed）
-└── utils/                 # 工具类
-```
-
-**核心设计原则**:
-- 📦 **适配器模式**: 统一多数据源接口，屏蔽供应商差异
-- 🔌 **依赖注入**: 使用 `dependency-injector` 管理服务生命周期
-- 🧭 **配置化路由**: 按 `asset_type + exchange + data_type` 选择 provider
-- 🛡️ **容错优先**: 健康跟踪 + cooldown + fallback 多层保障
-- 🧩 **符号标准化**: 统一到 `EXCHANGE:SYMBOL`，并沉淀 alias/canonical_id
-
-**请求主链路（简版）**:
-1. API/MCP 接收请求 -> use_case
-2. `MarketGateway` 调 `SymbolResolver` 做标准化与错误语义统一
-3. `SymbolResolver` 持久化主数据（`asset/listing/alias/identifier`）
-4. `MarketRouter` 按策略选源并结合健康状态执行调用
-5. 全部失败回退 `AdapterManager` legacy 路由
-
-完整时序图见: [`docs/request-flow-mermaid.md`](docs/request-flow-mermaid.md)
-
-### 📄 许可证
-
-MIT License
-
----
-
-<a name="english-documentation"></a>
-
-## 🇬🇧 English Documentation
-
-### 📖 Introduction
-
-A powerful, comprehensive Model Context Protocol (MCP) server for financial market data, technical analysis, and fundamental research.
-
-Designed to empower AI agents (like Claude, Cursor, etc.) with professional-grade stock market capabilities, bridging the gap between LLMs and real-time financial data.
-
-### 🚀 Features
-
-#### 1. Multi-Source Market Data
-
-Stop worrying about which API to use. The server features a smart **Adapter Manager** that automatically routes requests and handles failover across multiple providers:
-
-- **US Stocks**: Yahoo Finance, Finnhub
-- **China A-Shares**: Akshare, Tushare, Baostock
-- **Crypto**: CCXT (Binance, OKX, etc.)
-- **Forex & Indices**: Yahoo Finance
-
-#### 2. Professional Technical Analysis
-
-Built-in quantitative analysis engine providing more than just raw numbers:
-
-- **Indicators**: SMA/EMA, RSI, MACD, Bollinger Bands, KDJ, ATR
-- **Pattern Recognition**: Automatically detects candlestick patterns (Doji, Hammer, Engulfing)
-- **Support & Resistance**: Dynamic calculation of key price levels
-- **Volume Profile**: Analysis of volume distribution to identify value areas
-
-#### 3. Deep Fundamental Research
-
-Automated financial analyst capabilities:
-
-- **Financial Statements**: Balance Sheet, Income Statement, Cash Flow
-- **Health Scoring**: 0-100 proprietary health score based on Profitability, Solvency, Growth, and Valuation
-- **Key Ratios**: PE, PB, ROE, ROA, Debt-to-Equity, and more
-
-#### 4. Smart Aggregation Tools
-
-Optimized for LLM context windows:
-
-- `perform_deep_research`: One-shot tool to fetch price, history, fundamentals, and recent news for a symbol
-- `get_market_report`: A comprehensive snapshot of the current market status
-
-### 🛠️ Installation
-
-#### Prerequisites
-
-- Python 3.10+
-- Redis (optional, for caching)
-
-#### Setup
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/yourusername/stock-tool-mcp.git
-   cd stock-tool-mcp
-   ```
-
-2. **Create and activate Conda environment**
-   ```bash
-   # Create Python 3.11.14 environment
-   conda create -n stock-mcp python=3.11.14
-   
-   # Activate environment
-   conda activate stock-mcp
-   ```
-
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Configuration**
-   
-   Copy the example environment file:
-   ```bash
-   cp .env.example .env
-   ```
-   
-   Edit `.env` to add your API keys (optional but recommended for higher limits):
-   - `TUSHARE_ENABLED` - Enable Tushare data source (default: False)
-   - `TUSHARE_TOKEN` - For China A-shares data ([Get Token](https://tushare.pro/register))
-   - `TUSHARE_HTTP_URL` - Optional custom Tushare endpoint (private deployment/mirror)
-   - `FINNHUB_ENABLED` - Enable Finnhub data source (default: False)
-   - `FINNHUB_API_KEY` - For US institutional data ([Get API Key](https://finnhub.io/))
-   - `FRED_API_KEY` - For US macro indicators (GDP/CPI/Unemployment/Rates, free key, [Get API Key](https://fred.stlouisfed.org/docs/api/api_key.html))
-   - `DASHSCOPE_API_KEY` - For Alibaba Cloud AI (optional, for testing)
-
-   > **💡 Note**: This project features a **pluggable design**. If API keys are not configured, the system will automatically disable the corresponding data sources and use free alternatives (like Akshare, Baostock, Yahoo Finance) as fallbacks.
-
-### 🏃‍♂️ Usage
-
-#### Method 1: Run as HTTP Server (Recommended for Testing & Development)
-
-Start the MCP server using uvicorn (Streamable HTTP mode):
-
-```bash
-# Set environment variable to specify transport mode
-export MCP_TRANSPORT=streamable-http
-
-# Standard run (listening on port 9898)
-python -m uvicorn src.server.app:app --host 0.0.0.0 --port 9898
-
-# Development mode (with hot reload)
-MCP_TRANSPORT=streamable-http python -m uvicorn src.server.app:app --reload --port 9898
-```
-
-After successful startup, you'll see:
-```
-✅ MCP server ready!
-```
-
-**Example (Streamable HTTP mode)**:
-
-![Query Moutai Price - HTTP Mode](docs/query_maotao_streamablehttp.png)
-
-#### Method 2: Use stdio Mode (Recommended for AI Agent Integration)
-
-stdio mode communicates with AI agents via standard input/output, suitable for local integration with Claude Desktop, Cursor, etc.
-
-**Quick Start**:
-```bash
-# Use the startup script (conda environment pre-configured)
-bash start_stock_mcp_stdio.sh
-```
-
-**Manual Start**:
-```bash
-# Activate conda environment
-conda activate stock-mcp
-
-# Start stdio mode (default transport)
-python -c "import src.server.mcp.server as m; m.create_mcp_server().run(transport='stdio')"
-```
-
-**Integrate with Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
-```json
-{
-  "mcpServers": {
-    "stock-tools": {
-      "command": "bash",
-      "args": ["start_stock_mcp_stdio.sh"],
-      "cwd": "/path/to/stock-tool-mcp"
-    }
-  }
-}
-```
-
-**Integrate with Cursor** (`.cursor/mcp_config.json`):
-```json
-{
-  "mcpServers": {
-    "stock-tools": {
-      "command": "bash",
-      "args": ["start_stock_mcp_stdio.sh"],
-      "cwd": "/path/to/stock-tool-mcp"
-    }
-  }
-}
-```
-
-**Example (stdio mode)**:
-
-![Query Moutai Price - stdio Mode](docs/query_maotao_stdio.png)
-
-#### Method 3: HTTP API Calls
-
-After starting the server, you can call it via HTTP interface (Streamable HTTP protocol):
-
-```bash
-# List all available tools
-curl -X POST http://localhost:9898 \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "method": "tools/list",
-    "params": {},
-    "id": "1"
-  }'
-
-# Call tool example: Query Moutai stock price
-curl -X POST "http://localhost:9898/?_tool=get_kline_data" \
+curl -X POST http://127.0.0.1:9898/mcp \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0",
@@ -539,138 +329,240 @@ curl -X POST "http://localhost:9898/?_tool=get_kline_data" \
         "ticker": "SSE:600519"
       }
     },
-    "id": "2"
+    "id": "1"
   }'
 ```
 
-### 🧰 Available Tools
+### 常用环境变量
 
-> The actual enabled tools are defined in the MCP registry (`src/server/mcp/registry.py`).
+推荐优先关注这些变量：
 
-| Tool Name                        | Description                                                      | Example Parameters                                                               |
-| -------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `search_assets`                  | Search for stocks, crypto, or ETFs by name or ticker             | `{"query": "Moutai", "limit": 5}`                                               |
-| `get_kline_data`          | Fetch OHLCV data for a specific date range                       | `{"ticker": "SSE:600519", "start_date": "2024-01-01", "end_date": "2024-12-31"}` |
-| `get_technical_indicators` | Compute technical indicators (RSI, MACD, etc.)                   | `{"symbol": "SSE:600519", "period": "90d", "interval": "1d"}`                    |
-| `get_financial_reports`          | Revenue & net income charts                                      | `{"symbol": "SSE:600519"}`                                                       |
-| `get_mainbz_info`                | Main business composition                                        | `{"symbol": "SSE:600519"}`                                                       |
-| `get_shareholder_info`           | Shareholder information                                          | `{"symbol": "SSE:600519"}`                                                       |
-| `get_dividend_info`              | Dividend history                                                 | `{"symbol": "SSE:600519"}`                                                       |
-| `get_money_flow`                 | Money flow for a stock                                           | `{"symbol": "SSE:600519", "days": 20}`                                           |
-| `get_north_bound_flow`           | Northbound capital flow                                          | `{"days": 30}`                                                                   |
-| `get_macro_data`                 | Macro indicators (CPI/PPI/M2/GDP)                                | `{"indicators": "CPI,PPI,M2,GDP"}`                                               |
+- `STOCK_MCP_AUTH_MODE=none|token|jwt`
+- `STOCK_MCP_STATIC_BEARER_TOKEN`
+- `MCP_HOST`, `MCP_PORT`
+- `DOCKER_POSTGRES_PORT`, `DOCKER_POSTGRES_USER`, `DOCKER_POSTGRES_PASSWORD`, `DOCKER_POSTGRES_DB`
+- `PROXY_ENABLED`, `PROXY_HOST`, `PROXY_PORT`
+- `DOCKER_PROXY_HOST`
+- `TUSHARE_ENABLED`, `TUSHARE_TOKEN`, `TUSHARE_HTTP_URL`
+- `FINNHUB_ENABLED`, `FINNHUB_API_KEY`
+- `TAVILY_API_KEY`
+- `SECURITY_MASTER_BACKEND`, `SECURITY_MASTER_SQLITE_PATH`
+- `DATABASE_URL`
+- `MCP_TOOL_TIMEOUT_SECONDS`, `PROVIDER_CALL_TIMEOUT_SECONDS`
 
-> **💡 Important Note**: 
-> - A-share ticker format: `SSE:600519` (Shanghai), `SZSE:000001` (Shenzhen)
-> - US stock ticker format: `NASDAQ:AAPL`, `NYSE:TSLA`
-> - Crypto format: `CRYPTO:BTC`, `CRYPTO:ETH`
+完整示例见：
 
-### 📸 Real-World Examples
+- [`/Users/huweihua/java/qiuzhao/stock-mcp/.env.example`](/Users/huweihua/java/qiuzhao/stock-mcp/.env.example)
 
-This project supports two transport protocols, each suitable for different scenarios:
-
-#### 1. Streamable HTTP Mode
-Suitable for HTTP interface calls, convenient for testing and integration into web applications:
-
-![Query Moutai Price - HTTP Mode](docs/query_maotao_streamablehttp.png)
-
-#### 2. stdio Mode
-Suitable for direct integration into AI Agents (like Claude Desktop, Cursor), communicating via standard input/output:
-
-![Query Moutai Price - stdio Mode](docs/query_maotao_stdio.png)
-
-> **💡 Differences Between the Two Modes**:
-> - **Streamable HTTP**: Requires a web server, supports remote calls, suitable for production environments
-> - **stdio**: Direct process communication, no network port required, suitable for local AI Agent integration with lower latency
-
-### 🧪 Test Scripts
-
-The project provides comprehensive test scripts to help you quickly verify functionality:
-
-#### 1. HTTP Interface Testing
-
-Use `scripts/test_mcp_refactor.py` for quick MCP + REST sanity checks:
+### 测试
 
 ```bash
-# 1. Start the MCP server (in one terminal)
-python -m uvicorn src.server.app:app --host 0.0.0.0 --port 9898
-
-# 2. Run the test script in another terminal
-NO_PROXY=localhost,127.0.0.1 python scripts/test_mcp_refactor.py
+uv run pytest
 ```
 
-This script will:
-- ✅ Connect to the MCP server (http://localhost:9898)
-- ✅ List all available tools
-- ✅ Use Alibaba Cloud Qwen to call tools
-- ✅ Query Moutai's price and fundamentals
+### 项目目录
 
-#### 2. OpenAPI Documentation Generation
+```text
+stock-mcp/
+├── src/server/api/             # FastAPI HTTP 路由
+├── src/server/mcp/             # MCP server 与 tools
+├── src/server/domain/          # adapter / service / router
+├── src/server/infrastructure/  # Redis / Postgres / 外部连接
+├── src/server/core/            # 配置、依赖注入、启动流程
+├── docs/                       # 补充文档
+└── tests/                      # pytest 测试
+```
 
-Use `scripts/mcp2openapi.py` to generate OpenAPI specification:
+### License
+
+MIT
+
+---
+
+## English
+
+### What it is
+
+`stock-mcp` is an open-source financial data service with two public interfaces:
+
+- `MCP` for AI agents such as Claude Desktop, Cursor, and DeerFlow
+- `HTTP API` for regular backends, scripts, and service integrations
+
+It is designed to provide reliable market data and analysis tools, not investment advice.
+
+### One-command start
 
 ```bash
-python scripts/mcp2openapi.py
+git clone https://github.com/yourusername/stock-mcp.git
+cd stock-mcp
+cp .env.example .env
+docker compose up -d --build
 ```
 
-The generated OpenAPI documentation can be imported into tools like Apifox or Postman for testing.
+Default endpoints:
 
-### 🗺️ Roadmap & Future Plans
+- `http://127.0.0.1:9898/health`
+- `http://127.0.0.1:9898/docs`
+- `http://127.0.0.1:9898/mcp`
 
-While the data retrieval and analysis capabilities are robust, the following features are planned for future releases:
+Default services:
 
-- [ ] **Real Trading Execution**: Currently, the `execute_order` tool runs in **simulation mode**. We plan to integrate real trading capabilities via CCXT (for crypto) and broker APIs (for stocks)
-- [ ] **Advanced Caching Strategy**: Implement fine-grained TTL (Time-To-Live) settings to distinguish between real-time price data (short TTL) and financial reports (long TTL) for better performance and API quota management
-- [ ] **User Account Management**: Secure handling of user-specific exchange API keys for personalized trading
-- [ ] **More Data Adapters**: Expansion to include more specialized data sources (e.g., sentiment analysis providers, alternative data)
-- [ ] **WebSocket Real-time Push**: Support real-time market data push to reduce polling overhead
-- [ ] **Backtesting Engine**: Built-in strategy backtesting functionality to validate trading strategies
+- `stock-mcp`
+- `redis`
+- `postgres`
 
-### 🏗️ Project Architecture
+Default host ports:
 
-This project uses a **DDD + layered architecture** and supports both REST and MCP protocol entry points.
+- `stock-mcp`: `127.0.0.1:9898`
+- `postgres`: `127.0.0.1:15432`
 
+### Main capabilities
+
+- Market data across A-shares, US equities, ETFs, indices, and crypto
+- Technical indicators such as RSI, MACD, moving averages, support/resistance, candlestick patterns
+- Fundamentals, money flow, chip analysis, filings, and Tavily-backed news search
+- Agent-friendly MCP tools and code-export endpoints
+
+### Public interfaces
+
+HTTP route groups:
+
+- `/api/v1/market/*`
+- `/api/v1/fundamental/*`
+- `/api/v1/money-flow/*`
+- `/api/v1/news/*`
+- `/api/v1/filings/*`
+- `/api/v1/code-export/*`
+- `/health`
+- `/docs` / `/redoc`
+
+MCP endpoint:
+
+- `/mcp`
+
+### Architecture
+
+```text
+MCP clients / HTTP clients
+          |
+          v
+    FastAPI + FastMCP
+          |
+          v
+Domain services / Adapter manager / Router
+          |
+          v
+Tushare / Akshare / Baostock / Yahoo / Finnhub / FRED / CCXT / EDGAR ...
+          |
+          v
+Redis / Postgres
 ```
-src/server/
-├── app.py                 # FastAPI + MCP entry
-├── api/                   # REST layer (routes + request models)
-├── mcp/                   # MCP protocol layer
-│   ├── registry.py        # MCP tool registry (single source of truth)
-│   └── tools/             # MCP tool definitions
-├── core/                  # Application layer (bootstrap, DI, use cases)
-│   ├── bootstrap.py        # Bootstrap (connections/adapters)
-│   ├── dependencies.py     # Dependency injection container
-│   └── use_cases/          # Shared use cases (MCP/REST)
-├── domain/                # Domain layer (core capabilities)
-│   ├── market_gateway.py   # Unified gateway (resolve + route entry)
-│   ├── adapter_manager.py  # Multi-source adapter orchestration + failover
-│   ├── adapters/          # Data adapters (Akshare/Tushare/Baostock/Yahoo/Finnhub/CCXT/TwelveData)
-│   ├── symbols/           # Symbol normalization (EXCHANGE:SYMBOL)
-│   ├── routing/           # Routing policy + health tracking + cooldown
-│   └── security_master/   # Master data (listing/alias/identifier/provider_symbol)
-├── infrastructure/        # Infrastructure layer
-│   ├── connections/       # Redis/Postgres/Tushare/Finnhub/Baostock connections
-│   └── cache/             # Cache wrapper
-├── config/                # Settings and routing policies
-└── utils/                 # Utilities
+
+### Authentication modes
+
+- `none`: local development and quick trial
+- `token`: static Bearer token for personal or intranet deployment
+- `jwt`: production mode using OIDC / JWKS compatible JWT verification
+
+### Proxy boundary
+
+Explicit proxy for foreign providers:
+
+- `Yahoo / yfinance`
+- `Finnhub`
+- `Futures`
+- `Alpha Vantage`
+- `Twelve Data`
+- `FRED`
+- `CCXT`
+- `Crypto`
+- `EDGAR`
+
+Direct connection for domestic providers:
+
+- `Tushare`
+- `Akshare`
+- `Baostock`
+
+In Docker mode, `PROXY_HOST` is overridden to `host.docker.internal` by default. Override it with
+`DOCKER_PROXY_HOST` when needed.
+
+### Run modes
+
+#### Local uv
+
+```bash
+uv sync --dev
+cp .env.example .env
+export STOCK_MCP_AUTH_MODE=none
+uv run python -m uvicorn src.server.app:app --host 127.0.0.1 --port 9898
 ```
 
-**Core Design Principles**:
-- 📦 **Adapter Pattern**: Unified multi-source interface with provider abstraction
-- 🔌 **Dependency Injection**: Using `dependency-injector` for service lifecycle management
-- 🧭 **Policy-Driven Routing**: Provider selection by `asset_type + exchange + data_type`
-- 🛡️ **Resilience by Design**: Health tracking + cooldown + fallback layers
-- 🧩 **Symbol Standardization**: Normalize inputs into `EXCHANGE:SYMBOL` with alias/canonical persistence
+#### Docker Compose
 
-**Request Flow (Short Version)**:
-1. API/MCP receives request -> use_case
-2. `MarketGateway` calls `SymbolResolver` for normalization and error semantics
-3. `SymbolResolver` persists master data (`asset/listing/alias/identifier`)
-4. `MarketRouter` selects providers by policy and executes with health checks
-5. If all providers fail, fallback to legacy `AdapterManager` routing
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
 
-Full sequence diagram: [`docs/request-flow-mermaid.md`](docs/request-flow-mermaid.md)
+If you previously used different database settings or stale volumes exist:
 
-### 📄 License
+```bash
+docker compose down -v
+docker compose up -d --build
+```
 
-MIT License
+#### stdio MCP
+
+```bash
+uv run python -c "import src.server.mcp.server as m; m.create_mcp_server().run(transport='stdio')"
+```
+
+### Example calls
+
+HTTP:
+
+```bash
+curl -X POST http://127.0.0.1:9898/api/v1/market/indicators/calculate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "symbol": "SSE:600519",
+    "period": "6mo",
+    "interval": "1d"
+  }'
+```
+
+MCP:
+
+```bash
+curl -X POST http://127.0.0.1:9898/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {
+      "name": "get_kline_data",
+      "arguments": {
+        "ticker": "SSE:600519"
+      }
+    },
+    "id": "1"
+  }'
+```
+
+### Repository layout
+
+```text
+stock-mcp/
+├── src/server/api/
+├── src/server/mcp/
+├── src/server/domain/
+├── src/server/infrastructure/
+├── src/server/core/
+├── docs/
+└── tests/
+```
+
+### License
+
+MIT

@@ -11,12 +11,13 @@ logger = logging.getLogger(__name__)
 
 
 class FinnhubConnection(AsyncDataSourceConnection):
-    """FinnHub API connection wrapper (no proxy)."""
+    """FinnHub API connection wrapper."""
 
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         self._api_key = config.get("api_key")
         self._base_url = "https://finnhub.io/api/v1"
+        self._proxy_url = config.get("proxy_url")
         self._session: Any = None
 
     async def connect(self) -> bool:
@@ -31,9 +32,20 @@ class FinnhubConnection(AsyncDataSourceConnection):
 
             def create_session():
                 session = requests.Session()
+                session.trust_env = False
                 session.headers.update(
                     {"X-Finnhub-Token": self._api_key, "User-Agent": "Mozilla/5.0"}
                 )
+                if self._proxy_url:
+                    session.proxies.update(
+                        {
+                            "http": self._proxy_url,
+                            "https": self._proxy_url,
+                        }
+                    )
+                    logger.info("✅ FinnHub connection configured with explicit proxy")
+                else:
+                    logger.info("ℹ️ FinnHub connection running without proxy")
                 return session
 
             self._session = await loop.run_in_executor(None, create_session)

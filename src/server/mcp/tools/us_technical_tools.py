@@ -17,7 +17,7 @@ from fastmcp import FastMCP, Context
 from src.server.core.use_cases import technical as technical_use_cases
 from src.server.utils.logger import logger
 from src.server.mcp.tools.artifact_utils import (
-    ComponentType,
+    ResourceVariant,
     create_artifact_envelope,
     create_artifact_response,
     create_symbol_error_response,
@@ -93,7 +93,7 @@ def register_us_technical_tools(mcp: FastMCP):
             )
 
             artifact = create_artifact_envelope(
-                component_type=ComponentType.US_TECHNICAL_CHART,
+                variant=ResourceVariant.US_TECHNICAL_CHART,
                 name=f"{symbol} 技术指标",
                 content=result,
                 description=summary,
@@ -105,7 +105,7 @@ def register_us_technical_tools(mcp: FastMCP):
 
         except SymbolResolutionError as e:
             return create_symbol_error_response(
-                e, ComponentType.US_TECHNICAL_CHART, f"{symbol} 技术指标"
+                e, ResourceVariant.US_TECHNICAL_CHART, f"{symbol} 技术指标"
             )
         except Exception as e:
             logger.error(
@@ -113,7 +113,7 @@ def register_us_technical_tools(mcp: FastMCP):
             )
             summary = f"获取 {symbol} 技术指标失败: {e}"
             artifact = create_artifact_envelope(
-                component_type=ComponentType.US_TECHNICAL_CHART,
+                variant=ResourceVariant.US_TECHNICAL_CHART,
                 name=f"{symbol} 技术指标",
                 content={"error": str(e)},
                 description=summary,
@@ -176,7 +176,7 @@ def register_us_technical_tools(mcp: FastMCP):
             )
 
             artifact = create_artifact_envelope(
-                component_type=ComponentType.US_VOLUME_ANALYSIS,
+                variant=ResourceVariant.US_VOLUME_ANALYSIS,
                 name=f"{symbol} 量价分析",
                 content=data,
                 description=summary,
@@ -188,13 +188,13 @@ def register_us_technical_tools(mcp: FastMCP):
 
         except SymbolResolutionError as e:
             return create_symbol_error_response(
-                e, ComponentType.US_VOLUME_ANALYSIS, f"{symbol} 量价分析"
+                e, ResourceVariant.US_VOLUME_ANALYSIS, f"{symbol} 量价分析"
             )
         except Exception as e:
             logger.error("get_us_volume_analysis error", symbol=symbol, error=str(e))
             summary = f"获取 {symbol} 量价分析失败: {e}"
             artifact = create_artifact_envelope(
-                component_type=ComponentType.US_VOLUME_ANALYSIS,
+                variant=ResourceVariant.US_VOLUME_ANALYSIS,
                 name=f"{symbol} 量价分析",
                 content={"error": str(e)},
                 description=summary,
@@ -260,7 +260,7 @@ def register_us_technical_tools(mcp: FastMCP):
                 summary = f"{symbol} K线数据为空"
 
             artifact = create_artifact_envelope(
-                component_type=ComponentType.US_TECHNICAL_CHART,
+                variant=ResourceVariant.US_TECHNICAL_CHART,
                 name=f"{symbol} K线数据 ({interval})",
                 content=data,
                 description=summary,
@@ -272,13 +272,13 @@ def register_us_technical_tools(mcp: FastMCP):
 
         except SymbolResolutionError as e:
             return create_symbol_error_response(
-                e, ComponentType.US_TECHNICAL_CHART, f"{symbol} K线"
+                e, ResourceVariant.US_TECHNICAL_CHART, f"{symbol} K线"
             )
         except Exception as e:
             logger.error("get_us_price_history error", symbol=symbol, error=str(e))
             summary = f"获取 {symbol} K线数据失败: {e}"
             artifact = create_artifact_envelope(
-                component_type=ComponentType.US_TECHNICAL_CHART,
+                variant=ResourceVariant.US_TECHNICAL_CHART,
                 name=f"{symbol} K线",
                 content={"error": str(e)},
                 description=summary,
@@ -434,7 +434,7 @@ def register_us_technical_tools(mcp: FastMCP):
             }
 
             artifact = create_artifact_envelope(
-                component_type=ComponentType.US_TECHNICAL_CHART,
+                variant=ResourceVariant.US_TECHNICAL_CHART,
                 name=f"{symbol} 技术综合分析",
                 content=content,
                 description=summary,
@@ -446,7 +446,7 @@ def register_us_technical_tools(mcp: FastMCP):
 
         except SymbolResolutionError as e:
             return create_symbol_error_response(
-                e, ComponentType.US_TECHNICAL_CHART, f"{symbol} 技术分析"
+                e, ResourceVariant.US_TECHNICAL_CHART, f"{symbol} 技术分析"
             )
         except Exception as e:
             logger.error(
@@ -454,7 +454,7 @@ def register_us_technical_tools(mcp: FastMCP):
             )
             summary = f"技术综合分析失败 ({symbol}): {e}"
             artifact = create_artifact_envelope(
-                component_type=ComponentType.US_TECHNICAL_CHART,
+                variant=ResourceVariant.US_TECHNICAL_CHART,
                 name=f"{symbol} 技术分析",
                 content={"error": str(e)},
                 description=summary,

@@ -28,10 +28,11 @@ from src.server.utils.logger import logger
 class CryptoAdapter(BaseDataAdapter):
     name = "crypto"
 
-    def __init__(self, cache):
+    def __init__(self, cache, proxy_url: Optional[str] = None):
         super().__init__(DataSource.CRYPTO)
         self.cache = cache
         self.logger = logger
+        self.proxy_url = proxy_url
 
     def get_capabilities(self) -> List[AdapterCapability]:
         """Declare Crypto adapter's capabilities."""
@@ -101,7 +102,7 @@ class CryptoAdapter(BaseDataAdapter):
         url = f"https://api.coingecko.com/api/v3/coins/{coin_id}"
 
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(proxy=self.proxy_url, trust_env=False) as client:
                 resp = await client.get(url, timeout=30)
                 if resp.status_code == 404:
                     return None
@@ -148,7 +149,7 @@ class CryptoAdapter(BaseDataAdapter):
         )
 
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(proxy=self.proxy_url, trust_env=False) as client:
                 resp = await client.get(url, timeout=30)
                 resp.raise_for_status()
                 data = resp.json()
@@ -201,7 +202,7 @@ class CryptoAdapter(BaseDataAdapter):
         }
 
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(proxy=self.proxy_url, trust_env=False) as client:
                 resp = await client.get(url, params=params, timeout=30)
                 resp.raise_for_status()
                 data = resp.json()

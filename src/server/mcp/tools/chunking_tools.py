@@ -8,6 +8,12 @@ from typing import Any, Dict, List, Optional
 
 from fastmcp import FastMCP, Context
 
+from src.server.mcp.tools.artifact_utils import (
+    create_artifact_envelope,
+    create_artifact_response,
+    create_mcp_error_result,
+    create_mcp_tool_result,
+)
 from src.server.utils.logger import logger
 
 _A_SHARE_PATTERN = re.compile(r"^(?:\d{6}|(?:SH|SZ)\d{6}|\d{6}\.(?:SH|SZ))$", re.IGNORECASE)
@@ -144,26 +150,18 @@ def register_chunking_tools(mcp: FastMCP):
             )
 
         if _looks_a_share_symbol(ticker) or not _is_us_symbol(ticker):
-            return {
-                "error": {
-                    "code": "INVALID_ROUTE",
-                    "message": "get_document_chunks is US SEC-only and does not accept A-share/non-US ticker.",
-                    "details": {"ticker": ticker, "doc_id": doc_id, "items": items},
-                },
-                "summary": "get_document_chunks only supports US SEC filings.",
-                "suggested_reroute": "Use A-share announcement/news capabilities for CN filings.",
-            }
+            return create_mcp_error_result(
+                "get_document_chunks only supports US SEC filings.",
+                error_code="INVALID_ROUTE",
+                details={"ticker": ticker, "doc_id": doc_id, "items": items, "suggested_reroute": "Use A-share announcement/news tools for CN filings."},
+            )
 
         if "cninfo" in str(doc_id or "").lower():
-            return {
-                "error": {
-                    "code": "INVALID_ROUTE",
-                    "message": "get_document_chunks does not accept cninfo document identifiers.",
-                    "details": {"ticker": ticker, "doc_id": doc_id},
-                },
-                "summary": "get_document_chunks only supports SEC accession documents.",
-                "suggested_reroute": "Use A-share announcement/news capabilities for CN filings.",
-            }
+            return create_mcp_error_result(
+                "get_document_chunks only supports SEC accession documents.",
+                error_code="INVALID_ROUTE",
+                details={"ticker": ticker, "doc_id": doc_id, "suggested_reroute": "Use A-share announcement/news tools for CN filings."},
+            )
         try:
             from src.server.utils.sec_utils import get_company
             
@@ -187,14 +185,19 @@ def register_chunking_tools(mcp: FastMCP):
                         break
             
             if not target_filing:
-                return {
-                    "result_status": "no_data",
-                    "summary": f"No filing found for {pure_symbol} accession={accession_number}",
-                    "no_data_reason": f"Filing not found: {accession_number} for {pure_symbol}",
-                    "scope": {"ticker": ticker, "doc_id": doc_id},
-                    "retriable": False,
-                    "suggested_reroute": "Adjust accession/time range or fetch filing list first.",
-                }
+                response = create_mcp_tool_result(
+                    f"No filing found for {pure_symbol} accession={accession_number}",
+                    resources=[],
+                    no_data_reason=f"Filing not found: {accession_number} for {pure_symbol}",
+                )
+                response.structuredContent.update(
+                    {
+                        "scope": {"ticker": ticker, "doc_id": doc_id},
+                        "retriable": False,
+                        "suggested_reroute": "Adjust accession/time range or fetch filing list first.",
+                    }
+                )
+                return response
             
             logger.info(f"📄 Found filing: {target_filing.form} dated {target_filing.filing_date}")
             
@@ -299,8 +302,7 @@ def register_chunking_tools(mcp: FastMCP):
                     extra={"count": len(all_chunks)}
                 )
 
-            return {
-                "result_status": "ok",
+            payload = {
                 "doc_id": accession_number,
                 "ticker": pure_symbol,
                 "form": target_filing.form,
@@ -308,6 +310,17 @@ def register_chunking_tools(mcp: FastMCP):
                 "chunks_count": len(all_chunks),
                 "chunks": all_chunks,
             }
+            artifact = create_artifact_envelope(
+                variant="filing_chunks",
+                name=f"{pure_symbol} Filing Chunks {accession_number}",
+                content=payload,
+                description=f"{pure_symbol} filing chunk extraction for {accession_number}",
+                display_in_report=False,
+            )
+            return create_artifact_response(
+                summary=f"{pure_symbol} filing chunks ready: {len(all_chunks)} chunks | doc_id={accession_number}",
+                artifact=artifact,
+            )
             
         except Exception as e:
             logger.error(f"get_document_chunks failed: {e}")
@@ -318,13 +331,11 @@ def register_chunking_tools(mcp: FastMCP):
                     f"❌ 文档分块失败: {ticker}",
                     extra={"error": str(e)}
                 )
-            return {
-                "error": {
-                    "code": "INTERNAL_ERROR",
-                    "message": str(e),
-                    "details": {"ticker": ticker, "doc_id": doc_id},
-                }
-            }
+            return create_mcp_error_result(
+                str(e),
+                error_code="INTERNAL_ERROR",
+                details={"ticker": ticker, "doc_id": doc_id},
+            )
 
 
 async def _fallback_markdown_chunking(filing, ticker: str, doc_id: str, ctx: Context = None) -> Dict[str, Any]:
@@ -332,14 +343,19 @@ async def _fallback_markdown_chunking(filing, ticker: str, doc_id: str, ctx: Con
     try:
         markdown_content = filing.markdown()
         if not markdown_content:
-            return {
-                "result_status": "no_data",
-                "summary": "Fallback markdown content is empty",
-                "no_data_reason": "Empty markdown content",
-                "scope": {"ticker": ticker, "doc_id": doc_id},
-                "retriable": False,
-                "suggested_reroute": "Try another filing or retrieve markdown content first.",
-            }
+            response = create_mcp_tool_result(
+                "Fallback markdown content is empty",
+                resources=[],
+                no_data_reason="Empty markdown content",
+            )
+            response.structuredContent.update(
+                {
+                    "scope": {"ticker": ticker, "doc_id": doc_id},
+                    "retriable": False,
+                    "suggested_reroute": "Try another filing or retrieve markdown content first.",
+                }
+            )
+            return response
         
         # Simple paragraph-based chunking
         paragraphs = markdown_content.split("\n\n")
@@ -385,23 +401,30 @@ async def _fallback_markdown_chunking(filing, ticker: str, doc_id: str, ctx: Con
         
         logger.info(f"📝 Fallback chunking: {len(chunks)} chunks")
         
-        return {
-            "result_status": "ok",
-            "doc_id": doc_id,
-            "ticker": ticker,
-            "form": filing.form,
-            "filing_date": str(filing.filing_date),
-            "chunks_count": len(chunks),
-            "chunks": chunks,
-            "fallback": True,
-        }
+        artifact = create_artifact_envelope(
+            variant="filing_chunks",
+            name=f"{ticker} Filing Chunks {doc_id}",
+            content={
+                "doc_id": doc_id,
+                "ticker": ticker,
+                "form": filing.form,
+                "filing_date": str(filing.filing_date),
+                "chunks_count": len(chunks),
+                "chunks": chunks,
+                "fallback": True,
+            },
+            description=f"{ticker} filing chunk extraction fallback for {doc_id}",
+            display_in_report=False,
+        )
+        return create_artifact_response(
+            summary=f"{ticker} filing chunks ready via fallback: {len(chunks)} chunks | doc_id={doc_id}",
+            artifact=artifact,
+        )
         
     except Exception as e:
         logger.error(f"Fallback chunking failed: {e}")
-        return {
-            "error": {
-                "code": "INTERNAL_ERROR",
-                "message": str(e),
-                "details": {"ticker": ticker, "doc_id": doc_id},
-            }
-        }
+        return create_mcp_error_result(
+            str(e),
+            error_code="INTERNAL_ERROR",
+            details={"ticker": ticker, "doc_id": doc_id},
+        )

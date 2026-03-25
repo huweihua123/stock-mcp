@@ -693,7 +693,7 @@ class BaostockAdapter(BaseDataAdapter):
                     break
 
             result = {
-                "component_type": "dividend_info",
+                "variant": "dividend_info",
                 "source": "baostock",
                 "ts_code": ts_code,
                 "rows": dedup_rows,
@@ -783,7 +783,7 @@ class BaostockAdapter(BaseDataAdapter):
                     break
 
             result = {
-                "component_type": "forecast_info",
+                "variant": "forecast_info",
                 "source": "baostock",
                 "ts_code": ts_code,
                 "rows": dedup_rows,
@@ -858,7 +858,7 @@ class BaostockAdapter(BaseDataAdapter):
 
             latest = data[-1] if data else {}
             result = {
-                "component_type": "money_supply",
+                "variant": "money_supply",
                 "source": "baostock",
                 "data": data,
                 "summary": {

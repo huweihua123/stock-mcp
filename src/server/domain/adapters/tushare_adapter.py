@@ -15,6 +15,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 
 from src.server.domain.adapters.base import BaseDataAdapter
+from src.server.domain.sector_matching import (
+    pick_sector_resolution,
+    rank_sector_candidates,
+)
 from src.server.domain.types import (
     AdapterCapability,
     Asset,
@@ -509,7 +513,7 @@ class TushareAdapter(BaseDataAdapter):
 
             if df is None or df.empty:
                 result = {
-                    "component_type": "forecast_info",
+                    "variant": "forecast_info",
                     "source": "tushare",
                     "ts_code": ts_code,
                     "rows": [],
@@ -549,7 +553,7 @@ class TushareAdapter(BaseDataAdapter):
                     dedup_rows = dedup_rows[:limit]
 
                 result = {
-                    "component_type": "forecast_info",
+                    "variant": "forecast_info",
                     "source": "tushare",
                     "ts_code": ts_code,
                     "rows": dedup_rows,
@@ -605,7 +609,7 @@ class TushareAdapter(BaseDataAdapter):
                 result = {
                     "symbol": ts_code,
                     "ticker": ticker,
-                    "component_type": "money_flow",
+                    "variant": "money_flow",
                     "source": "tushare",
                     "amount_unit": "10k_cny",
                     "records": [],
@@ -665,7 +669,7 @@ class TushareAdapter(BaseDataAdapter):
             result = {
                 "symbol": ts_code,
                 "ticker": ticker,
-                "component_type": "money_flow",
+                "variant": "money_flow",
                 "source": "tushare",
                 "amount_unit": "10k_cny",
                 "data": {
@@ -735,7 +739,7 @@ class TushareAdapter(BaseDataAdapter):
             north_total = df["north_money"].fillna(0).tolist()
 
             result = {
-                "component_type": "north_bound_flow",
+                "variant": "north_bound_flow",
                 "source": "tushare",
                 "data": {
                     "dates": dates,
@@ -808,7 +812,7 @@ class TushareAdapter(BaseDataAdapter):
             result = {
                 "symbol": ts_code,
                 "ticker": ticker,
-                "component_type": "chip_distribution",
+                "variant": "chip_distribution",
                 "source": "tushare",
                 "data": {
                     "dates": df["trade_date"]
@@ -862,7 +866,7 @@ class TushareAdapter(BaseDataAdapter):
             if df is None or df.empty:
                 return {
                     "data": [],
-                    "component_type": "money_supply",
+                    "variant": "money_supply",
                     "source": "tushare",
                 }
 
@@ -870,7 +874,7 @@ class TushareAdapter(BaseDataAdapter):
             df = df.where(df.notnull(), None)
             data = df.to_dict("records")
             result = {
-                "component_type": "money_supply",
+                "variant": "money_supply",
                 "source": "tushare",
                 "data": data,
                 "summary": {},
@@ -902,7 +906,7 @@ class TushareAdapter(BaseDataAdapter):
             ppi_df = await self._run(client.cn_ppi, start_m=start_m, end_m=end_m)
 
             result = {
-                "component_type": "inflation_data",
+                "variant": "inflation_data",
                 "source": "tushare",
                 "data": {
                     "CPI": (
@@ -945,7 +949,7 @@ class TushareAdapter(BaseDataAdapter):
             if df is not None and not df.empty:
                 data = df.where(df.notnull(), None).to_dict("records")
             result = {
-                "component_type": "pmi_data",
+                "variant": "pmi_data",
                 "source": "tushare",
                 "data": data,
             }
@@ -981,7 +985,7 @@ class TushareAdapter(BaseDataAdapter):
             if df is not None and not df.empty:
                 data = df.where(df.notnull(), None).to_dict("records")
             result = {
-                "component_type": "gdp_data",
+                "variant": "gdp_data",
                 "source": "tushare",
                 "data": data,
             }
@@ -1014,7 +1018,7 @@ class TushareAdapter(BaseDataAdapter):
             if df is not None and not df.empty:
                 data = df.where(df.notnull(), None).to_dict("records")
             result = {
-                "component_type": "social_financing",
+                "variant": "social_financing",
                 "source": "tushare",
                 "data": data,
             }
@@ -1076,7 +1080,7 @@ class TushareAdapter(BaseDataAdapter):
             )
 
         result = {
-            "component_type": "interest_rates",
+            "variant": "interest_rates",
             "source": "tushare",
             "data": {
                 "shibor": (
@@ -1146,7 +1150,7 @@ class TushareAdapter(BaseDataAdapter):
                 margin = margin_df.where(margin_df.notnull(), None).to_dict("records")
 
             result = {
-                "component_type": "market_liquidity",
+                "variant": "market_liquidity",
                 "source": "tushare",
                 "data": {
                     "north_flow": north_flow,
@@ -1320,7 +1324,7 @@ class TushareAdapter(BaseDataAdapter):
                     blocked_reason = "insufficient_rank_data"
 
             result = {
-                "component_type": "market_money_flow",
+                "variant": "market_money_flow",
                 "source": "tushare",
                 "data_source": data_source or "unknown",
                 "data": data,
@@ -1455,58 +1459,42 @@ class TushareAdapter(BaseDataAdapter):
         self, sector_name: str
     ) -> Tuple[Optional[str], Optional[str], Optional[List[str]]]:
         """将板块名称解析为 (ts_code, matched_name, candidates).
-
-        解析顺序：
-          1. 精确匹配（等于）
-          2. 子串匹配（sector_name in name）
-          3. 反向子串匹配（name in sector_name 且 len>=2）
-        若找到唯一匹配，返回 (ts_code, name, None)；
-        若找到多个或零个，返回 (None, None, candidates_list)。
         """
-        # 先尝试直接精确查询（快路径，保持向后兼容）
-        client = self.tushare_conn.get_client()
-        if client is not None:
-            try:
-                df = await self._run(client.ths_index, name=sector_name)
-                if df is not None and not df.empty:
-                    code = df.iloc[0].get("ts_code")
-                    name = df.iloc[0].get("name", sector_name)
-                    if code:
-                        return code, name, None
-            except Exception:
-                pass
-
-        # 从全量列表模糊匹配
+        # 优先使用全量板块目录 + 统一打分，避免 ths_index(name) 第一条不稳定导致错码。
         all_sectors = await self._get_all_sectors()
-        if not all_sectors:
+        if all_sectors:
+            ranked = rank_sector_candidates(
+                sector_name,
+                all_sectors,
+                name_getter=lambda s: str(s.get("name", "")),
+                top_k=20,
+            )
+            winner, candidate_names = pick_sector_resolution(
+                sector_name,
+                ranked,
+                ambiguous_top_k=10,
+            )
+            if winner is not None:
+                row = winner.item
+                return str(row.get("ts_code") or ""), str(row.get("name") or ""), None
+            if candidate_names:
+                return None, None, candidate_names
             return None, None, None
 
-        # 1. 精确匹配
-        exact = [s for s in all_sectors if s["name"] == sector_name]
-        if len(exact) == 1:
-            return exact[0]["ts_code"], exact[0]["name"], None
-        if len(exact) > 1:
-            return exact[0]["ts_code"], exact[0]["name"], None
-
-        # 2. 子串匹配（sector_name 是候选名称的子串）
-        substr = [s for s in all_sectors if sector_name in s["name"]]
-        if len(substr) == 1:
-            return substr[0]["ts_code"], substr[0]["name"], None
-        if len(substr) > 1:
-            # 返回候选列表，让调用方决定
-            return None, None, [s["name"] for s in substr[:10]]
-
-        # 3. 反向子串（name 是 sector_name 的子串，且 name 长度>=2）
-        rev = [
-            s for s in all_sectors if len(s["name"]) >= 2 and s["name"] in sector_name
-        ]
-        if len(rev) == 1:
-            return rev[0]["ts_code"], rev[0]["name"], None
-        if len(rev) > 1:
-            # 取名称最长的（最具体）
-            rev_sorted = sorted(rev, key=lambda s: len(s["name"]), reverse=True)
-            return rev_sorted[0]["ts_code"], rev_sorted[0]["name"], None
-
+        # 兜底：当全量目录不可用时，回退到接口直查。
+        client = self.tushare_conn.get_client()
+        if client is None:
+            return None, None, None
+        try:
+            df = await self._run(client.ths_index, name=sector_name)
+            if df is None or df.empty:
+                return None, None, None
+            code = df.iloc[0].get("ts_code")
+            name = df.iloc[0].get("name", sector_name)
+            if code:
+                return str(code), str(name or sector_name), None
+        except Exception:
+            pass
         return None, None, None
 
     async def _resolve_sector_by_code(
@@ -1531,7 +1519,7 @@ class TushareAdapter(BaseDataAdapter):
         query = (query_text or "").strip()
         if not query:
             return {
-                "component_type": "sector_resolve",
+                "variant": "sector_resolve",
                 "source": "tushare",
                 "status": "not_found",
                 "query_text": query_text,
@@ -1543,7 +1531,7 @@ class TushareAdapter(BaseDataAdapter):
         by_code, by_code_name = await self._resolve_sector_by_code(query)
         if by_code:
             return {
-                "component_type": "sector_resolve",
+                "variant": "sector_resolve",
                 "source": "tushare",
                 "status": "resolved",
                 "query_text": query_text,
@@ -1555,7 +1543,7 @@ class TushareAdapter(BaseDataAdapter):
         index_code, matched_name, candidates = await self._resolve_sector_index(query)
         if index_code:
             return {
-                "component_type": "sector_resolve",
+                "variant": "sector_resolve",
                 "source": "tushare",
                 "status": "resolved",
                 "query_text": query_text,
@@ -1576,7 +1564,7 @@ class TushareAdapter(BaseDataAdapter):
                 for name in candidates
             ]
             return {
-                "component_type": "sector_resolve",
+                "variant": "sector_resolve",
                 "source": "tushare",
                 "status": "ambiguous",
                 "query_text": query_text,
@@ -1585,7 +1573,7 @@ class TushareAdapter(BaseDataAdapter):
             }
 
         return {
-            "component_type": "sector_resolve",
+            "variant": "sector_resolve",
             "source": "tushare",
             "status": "not_found",
             "query_text": query_text,
@@ -1621,6 +1609,12 @@ class TushareAdapter(BaseDataAdapter):
             if query_sector_id:
                 index_code, code_name = await self._resolve_sector_by_code(query_sector_id)
                 matched_name = code_name or query_name or query_sector_id
+                # Cross-adapter fallback: if sector_id dialect mismatches Tushare
+                # (e.g. AkShare BK0478), retry by sector_name.
+                if index_code is None and query_name:
+                    index_code, matched_name, candidates = await self._resolve_sector_index(
+                        query_name
+                    )
             else:
                 # 方案C：使用三级缓存 + 模糊匹配解析板块
                 index_code, matched_name, candidates = await self._resolve_sector_index(
@@ -1634,7 +1628,7 @@ class TushareAdapter(BaseDataAdapter):
                         "candidates": candidates,
                         "sector_name": query_name,
                         "sector_id": query_sector_id,
-                        "component_type": "sector_trend",
+                        "variant": "sector_trend",
                         "source": "tushare",
                     }
                 if query_sector_id:
@@ -1668,7 +1662,7 @@ class TushareAdapter(BaseDataAdapter):
             )
 
             result = {
-                "component_type": "sector_trend",
+                "variant": "sector_trend",
                 "source": "tushare",
                 "sector_name": display_name,
                 "index_code": index_code,
@@ -1710,7 +1704,7 @@ class TushareAdapter(BaseDataAdapter):
                 rows = df.where(df.notnull(), None).to_dict("records")
 
             result = {
-                "component_type": "ggt_daily",
+                "variant": "ggt_daily",
                 "source": "tushare",
                 "data": rows,
             }
@@ -1735,14 +1729,47 @@ class TushareAdapter(BaseDataAdapter):
         try:
             df = await self._run(client.fina_mainbz, ts_code=ts_code)
             rows = []
+            status = "no_data"
+            no_data_reason = "tushare.fina_mainbz returned empty rows"
+            dimensions_found = []
+            latest_period = None
             if df is not None and not df.empty:
                 df = df.sort_values("end_date", ascending=False)
                 rows = df.where(df.notnull(), None).to_dict("records")
+                status = "ok"
+                no_data_reason = None
+                dimensions_found = sorted(
+                    {
+                        str(row.get("type"))
+                        for row in rows
+                        if isinstance(row, dict) and row.get("type")
+                    }
+                )
+                latest_period = next(
+                    (
+                        str(row.get("end_date"))
+                        for row in rows
+                        if isinstance(row, dict) and row.get("end_date")
+                    ),
+                    None,
+                )
             result = {
-                "component_type": "mainbz_info",
+                "variant": "mainbz_info",
                 "source": "tushare",
                 "ts_code": ts_code,
                 "rows": rows,
+                "status": status,
+                "no_data_reason": no_data_reason,
+                "coverage": {
+                    "row_count": len(rows),
+                    "dimensions_found": dimensions_found,
+                    "expected_dimensions": ["P", "D", "I"],
+                    "latest_period": latest_period,
+                },
+                "reroute_if_no_data": [
+                    "use_filings_or_web_news_for_business_mix_narrative",
+                    "fallback_to_income_and_shareholder_tools",
+                ],
             }
             await self.cache.set(cache_key, result, ttl=3600)
             return result
@@ -1769,7 +1796,7 @@ class TushareAdapter(BaseDataAdapter):
             trade_df = await self._run(client.stk_holdertrade, ts_code=ts_code)
 
             result = {
-                "component_type": "shareholder_info",
+                "variant": "shareholder_info",
                 "source": "tushare",
                 "ts_code": ts_code,
                 "data": {
@@ -1954,7 +1981,7 @@ class TushareAdapter(BaseDataAdapter):
             result = {
                 "symbol": ts_code,
                 "ticker": ticker,
-                "component_type": "valuation_metrics",
+                "variant": "valuation_metrics",
                 "source": "tushare",
                 "trade_date": str(latest.get("trade_date", "")),
                 "metrics": metrics,
@@ -2014,6 +2041,12 @@ class TushareAdapter(BaseDataAdapter):
                 index_code, code_name = await self._resolve_sector_by_code(query_sector_id)
                 index_name = code_name or query_name or query_sector_id
                 candidates = None
+                # Cross-adapter fallback: if sector_id dialect mismatches Tushare
+                # (e.g. AkShare BK0478), retry by sector_name.
+                if index_code is None and query_name:
+                    index_code, index_name, candidates = await self._resolve_sector_index(
+                        query_name
+                    )
             else:
                 # Step 1: 方案C — 三级缓存 + 模糊匹配解析板块
                 index_code, index_name, candidates = await self._resolve_sector_index(
@@ -2029,7 +2062,7 @@ class TushareAdapter(BaseDataAdapter):
                         "candidates": candidates,
                         "sector_name": query_name,
                         "sector_id": query_sector_id,
-                        "component_type": "sector_flow",
+                        "variant": "sector_flow",
                         "source": "tushare",
                     }
                 if query_sector_id:
@@ -2038,13 +2071,13 @@ class TushareAdapter(BaseDataAdapter):
                         "sector_name": query_name,
                         "sector_id": query_sector_id,
                         "source": "tushare",
-                        "component_type": "sector_flow",
+                        "variant": "sector_flow",
                     }
                 return {
                     "error": f"未找到板块: {query_name}",
                     "sector_name": query_name,
                     "source": "tushare",
-                    "component_type": "sector_flow",
+                    "variant": "sector_flow",
                 }
 
             index_name = index_name or query_name or query_sector_id
@@ -2287,7 +2320,7 @@ class TushareAdapter(BaseDataAdapter):
                 trend = "仅行情数据"
 
             result = {
-                "component_type": "sector_money_flow",
+                "variant": "sector_money_flow",
                 "source": "tushare",
                 "sector_name": index_name,
                 "index_code": index_code,
@@ -2350,6 +2383,12 @@ class TushareAdapter(BaseDataAdapter):
                 index_code, code_name = await self._resolve_sector_by_code(query_sector_id)
                 index_name = code_name or query_name or query_sector_id
                 candidates = None
+                # Cross-adapter fallback: if sector_id dialect mismatches Tushare
+                # (e.g. AkShare BK0478), retry by sector_name.
+                if index_code is None and query_name:
+                    index_code, index_name, candidates = await self._resolve_sector_index(
+                        query_name
+                    )
             else:
                 index_code, index_name, candidates = await self._resolve_sector_index(
                     query_name
@@ -2362,7 +2401,7 @@ class TushareAdapter(BaseDataAdapter):
                         "candidates": candidates,
                         "sector_name": query_name,
                         "sector_id": query_sector_id,
-                        "component_type": "sector_valuation_metrics",
+                        "variant": "sector_valuation_metrics",
                         "source": "tushare",
                     }
                 if query_sector_id:
@@ -2370,13 +2409,13 @@ class TushareAdapter(BaseDataAdapter):
                         "error": f"未找到板块ID: {query_sector_id}",
                         "sector_name": query_name,
                         "sector_id": query_sector_id,
-                        "component_type": "sector_valuation_metrics",
+                        "variant": "sector_valuation_metrics",
                         "source": "tushare",
                     }
                 return {
                     "error": f"未找到板块: {query_name}",
                     "sector_name": query_name,
-                    "component_type": "sector_valuation_metrics",
+                    "variant": "sector_valuation_metrics",
                     "source": "tushare",
                 }
 
@@ -2388,7 +2427,7 @@ class TushareAdapter(BaseDataAdapter):
                     "error": f"板块 {display_name} 无成分股数据",
                     "sector_name": display_name,
                     "index_code": index_code,
-                    "component_type": "sector_valuation_metrics",
+                    "variant": "sector_valuation_metrics",
                     "source": "tushare",
                 }
 
@@ -2414,7 +2453,7 @@ class TushareAdapter(BaseDataAdapter):
                     "error": f"板块 {display_name} 成分股为空",
                     "sector_name": display_name,
                     "index_code": index_code,
-                    "component_type": "sector_valuation_metrics",
+                    "variant": "sector_valuation_metrics",
                     "source": "tushare",
                 }
 
@@ -2464,7 +2503,7 @@ class TushareAdapter(BaseDataAdapter):
                     "error": f"板块 {display_name} 估值数据为空",
                     "sector_name": display_name,
                     "index_code": index_code,
-                    "component_type": "sector_valuation_metrics",
+                    "variant": "sector_valuation_metrics",
                     "source": "tushare",
                     "member_count_total": len(member_codes),
                     "member_count_used": len(selected_codes),
@@ -2482,7 +2521,7 @@ class TushareAdapter(BaseDataAdapter):
                     "error": f"板块 {display_name} 估值数据为空",
                     "sector_name": display_name,
                     "index_code": index_code,
-                    "component_type": "sector_valuation_metrics",
+                    "variant": "sector_valuation_metrics",
                     "source": "tushare",
                 }
 
@@ -2524,7 +2563,7 @@ class TushareAdapter(BaseDataAdapter):
                     "error": f"板块 {display_name} 历史估值序列为空",
                     "sector_name": display_name,
                     "index_code": index_code,
-                    "component_type": "sector_valuation_metrics",
+                    "variant": "sector_valuation_metrics",
                     "source": "tushare",
                 }
 
@@ -2582,7 +2621,7 @@ class TushareAdapter(BaseDataAdapter):
                 )
 
             result = {
-                "component_type": "sector_valuation_metrics",
+                "variant": "sector_valuation_metrics",
                 "source": "tushare",
                 "sector_name": display_name,
                 "index_code": index_code,

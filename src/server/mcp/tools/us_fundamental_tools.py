@@ -16,7 +16,7 @@ from fastmcp import FastMCP, Context
 from src.server.core.use_cases import fundamental as fundamental_use_cases
 from src.server.utils.logger import logger
 from src.server.mcp.tools.artifact_utils import (
-    ComponentType,
+    ResourceVariant,
     create_artifact_envelope,
     create_artifact_response,
     create_table_artifact,
@@ -110,12 +110,12 @@ def register_us_fundamental_tools(mcp: FastMCP):
                 tag="earnings_history",
                 description=summary,
             )
-            artifact["component_type"] = ComponentType.EARNINGS_TABLE.value
+            artifact["variant"] = ResourceVariant.EARNINGS_TABLE.value
             return create_artifact_response(summary=summary, artifact=artifact)
 
         except SymbolResolutionError as e:
             return create_symbol_error_response(
-                e, ComponentType.EARNINGS_TABLE, f"{symbol} EPS历史"
+                e, ResourceVariant.EARNINGS_TABLE, f"{symbol} EPS历史"
             )
         except Exception as e:
             logger.error("get_earnings_history error", symbol=symbol, error=str(e))
@@ -135,7 +135,7 @@ def register_us_fundamental_tools(mcp: FastMCP):
                 summary = f"获取 {symbol} EPS历史失败: {e}"
                 content = {"error": str(e)}
             artifact = create_artifact_envelope(
-                component_type=ComponentType.EARNINGS_TABLE,
+                variant=ResourceVariant.EARNINGS_TABLE,
                 name=f"{symbol} EPS历史",
                 content=content,
                 description=summary,
@@ -200,18 +200,18 @@ def register_us_fundamental_tools(mcp: FastMCP):
                 tag="cash_flow_quality",
                 description=summary,
             )
-            artifact["component_type"] = ComponentType.CASH_FLOW_CHART.value
+            artifact["variant"] = ResourceVariant.CASH_FLOW_CHART.value
             return create_artifact_response(summary=summary, artifact=artifact)
 
         except SymbolResolutionError as e:
             return create_symbol_error_response(
-                e, ComponentType.CASH_FLOW_CHART, f"{symbol} 现金流"
+                e, ResourceVariant.CASH_FLOW_CHART, f"{symbol} 现金流"
             )
         except Exception as e:
             logger.error("get_cash_flow_quality error", symbol=symbol, error=str(e))
             summary = f"获取 {symbol} 现金流质量失败: {e}"
             artifact = create_artifact_envelope(
-                component_type=ComponentType.CASH_FLOW_CHART,
+                variant=ResourceVariant.CASH_FLOW_CHART,
                 name=f"{symbol} 现金流",
                 content={"error": str(e)},
                 description=summary,
@@ -260,7 +260,7 @@ def register_us_fundamental_tools(mcp: FastMCP):
             )
 
             artifact = create_artifact_envelope(
-                component_type=ComponentType.US_VALUATION,
+                variant=ResourceVariant.US_VALUATION,
                 name=f"{symbol} 估值指标",
                 content=data,
                 description=summary,
@@ -272,13 +272,13 @@ def register_us_fundamental_tools(mcp: FastMCP):
 
         except SymbolResolutionError as e:
             return create_symbol_error_response(
-                e, ComponentType.US_VALUATION, f"{symbol} 估值"
+                e, ResourceVariant.US_VALUATION, f"{symbol} 估值"
             )
         except Exception as e:
             logger.error("get_us_valuation_metrics error", symbol=symbol, error=str(e))
             summary = f"获取 {symbol} 估值指标失败: {e}"
             artifact = create_artifact_envelope(
-                component_type=ComponentType.US_VALUATION,
+                variant=ResourceVariant.US_VALUATION,
                 name=f"{symbol} 估值",
                 content={"error": str(e)},
                 description=summary,
@@ -341,12 +341,12 @@ def register_us_fundamental_tools(mcp: FastMCP):
                 tag="institutional_holdings",
                 description=summary,
             )
-            artifact["component_type"] = ComponentType.INSTITUTIONAL_HOLDINGS.value
+            artifact["variant"] = ResourceVariant.INSTITUTIONAL_HOLDINGS.value
             return create_artifact_response(summary=summary, artifact=artifact)
 
         except SymbolResolutionError as e:
             return create_symbol_error_response(
-                e, ComponentType.INSTITUTIONAL_HOLDINGS, f"{symbol} 机构持仓"
+                e, ResourceVariant.INSTITUTIONAL_HOLDINGS, f"{symbol} 机构持仓"
             )
         except Exception as e:
             logger.error(
@@ -354,7 +354,7 @@ def register_us_fundamental_tools(mcp: FastMCP):
             )
             summary = f"获取 {symbol} 机构持仓失败: {e}"
             artifact = create_artifact_envelope(
-                component_type=ComponentType.INSTITUTIONAL_HOLDINGS,
+                variant=ResourceVariant.INSTITUTIONAL_HOLDINGS,
                 name=f"{symbol} 机构持仓",
                 content={"error": str(e)},
                 description=summary,

@@ -259,9 +259,9 @@ class TechnicalService:
                     if isinstance(rows, list):
                         result["rows"] = rows[start_idx:]
 
-            # ⭐ 添加 component_type 以支持前端自动识别为可视化 Artifact
+            # Preserve renderer hints for downstream resource descriptors.
             if "error" not in result:
-                result["component_type"] = "technical_indicators"
+                result["variant"] = "technical_indicators"
                 result["symbol"] = symbol
                 result["title"] = f"技术指标分析: {symbol}"
 

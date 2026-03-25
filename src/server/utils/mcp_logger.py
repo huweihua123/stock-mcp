@@ -128,17 +128,19 @@ def _get_result_summary(result: Any) -> str:
         return "None"
 
     if isinstance(result, dict):
-        # 字典类型：返回 keys
-        if "error" in result:
-            return f"error: {result['error']}"
-
         keys = list(result.keys())
-
-        # 如果是 ArtifactEnvelope，提取关键信息
-        if "artifact_type" in result:
-            artifact_type = result.get("artifact_type", "unknown")
-            title = result.get("title", "untitled")
-            return f"ArtifactEnvelope(type={artifact_type}, title={title}, keys={keys})"
+        structured = result.get("structuredContent")
+        if isinstance(structured, dict):
+            resources = structured.get("resources")
+            if isinstance(resources, list) and resources:
+                first = resources[0] if isinstance(resources[0], dict) else {}
+                return (
+                    f"MCPResult(resources={len(resources)}, "
+                    f"uri={first.get('uri')}, mimeType={first.get('mimeType')})"
+                )
+            if result.get("isError"):
+                error = structured.get("error") if isinstance(structured.get("error"), dict) else {}
+                return f"MCPError(code={error.get('code')}, message={error.get('message')})"
 
         return f"dict with keys: {keys}"
 

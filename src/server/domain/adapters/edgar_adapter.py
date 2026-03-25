@@ -8,8 +8,6 @@ import asyncio
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from edgar import Company
-
 from src.server.domain.adapters.base import BaseDataAdapter
 from src.server.domain.types import (
     AdapterCapability,
@@ -20,7 +18,8 @@ from src.server.domain.types import (
     Exchange,
 )
 from src.server.utils.logger import logger
-from src.server.utils.sec_utils import get_company, get_cik_or_symbol
+from src.server.utils.proxy_utils import temporary_proxy_env
+from src.server.utils.sec_utils import get_company
 
 
 class EdgarAdapter(BaseDataAdapter):
@@ -28,10 +27,11 @@ class EdgarAdapter(BaseDataAdapter):
 
     name = "edgar"
 
-    def __init__(self, cache=None):
+    def __init__(self, cache=None, proxy_url: Optional[str] = None):
         super().__init__(DataSource.EDGAR)
         self.cache = cache
         self.logger = logger
+        self.proxy_url = proxy_url
 
     def get_capabilities(self) -> List[AdapterCapability]:
         """Declare EDGAR's capabilities - US exchanges only, mainly for filings."""
@@ -54,7 +54,7 @@ class EdgarAdapter(BaseDataAdapter):
         """Convert pure symbol to EXCHANGE:SYMBOL."""
         if ":" in source_ticker:
             return source_ticker
-        
+
         exchange = default_exchange or "NASDAQ"
         return f"{exchange}:{source_ticker}"
 
@@ -71,80 +71,76 @@ class EdgarAdapter(BaseDataAdapter):
         filing_types: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Fetch filings from SEC EDGAR."""
-        
+
         def _do_fetch():
             pure_symbol = self._extract_symbol(ticker)
             try:
-                company = get_company(pure_symbol)
-                
-                # 1. Get Filings Container
-                # We can use year to filter at source if start_date is provided and close enough
-                # But for simplicity and correctness with date ranges, we fetch latest
+                with temporary_proxy_env(self.proxy_url):
+                    company = get_company(pure_symbol)
+
                 filings = company.get_filings()
-                
-                # 2. Apply Filters (Form, Date)
-                results = []
-                
-                # Optimization: If only one form is requested, filter at source
+                results: List[Dict[str, Any]] = []
+
                 if filing_types and len(filing_types) == 1:
                     filings = filings.filter(form=filing_types[0])
-                
-                count = 0
-                # Iterate through filings (edgartools returns latest first by default)
-                for filing in filings:
-                    # Filter by Form (if multiple forms requested)
-                    if filing_types and len(filing_types) > 1 and filing.form not in filing_types:
-                        continue
-                    
-                    # Filter by Date
-                    # filing.filing_date is already a date object (or string, handle both)
-                    f_date = filing.filing_date
-                    if isinstance(f_date, str):
-                        f_date = datetime.strptime(f_date, "%Y-%m-%d").date()
-                    
-                    # Convert start_date/end_date to date for comparison
-                    start_date_date = start_date.date() if start_date else None
-                    end_date_date = end_date.date() if end_date else None
 
-                    if end_date_date and f_date > end_date_date:
+                start_date_date = start_date.date() if start_date else None
+                end_date_date = end_date.date() if end_date else None
+                count = 0
+
+                for filing in filings:
+                    if (
+                        filing_types
+                        and len(filing_types) > 1
+                        and filing.form not in filing_types
+                    ):
                         continue
-                    if start_date_date and f_date < start_date_date:
-                        # Assuming descending order, we can stop if we go past start_date
+
+                    filing_date = filing.filing_date
+                    if isinstance(filing_date, str):
+                        filing_date = datetime.strptime(
+                            filing_date, "%Y-%m-%d"
+                        ).date()
+
+                    if end_date_date and filing_date > end_date_date:
+                        continue
+                    if start_date_date and filing_date < start_date_date:
                         break
-                    
-                    # Construct Description
-                    description = ""
-                    # Priority 1: Items (common in 8-K)
+
                     if hasattr(filing, "items") and filing.items:
-                        # filing.items might be a list of strings, ensure clean join
-                        items_list = filing.items if isinstance(filing.items, list) else [str(filing.items)]
+                        items_list = (
+                            filing.items
+                            if isinstance(filing.items, list)
+                            else [str(filing.items)]
+                        )
                         description = ", ".join(items_list)
-                    # Priority 2: Primary Doc Description (common in 6-K/10-Q)
-                    elif hasattr(filing, "primary_doc_description") and filing.primary_doc_description:
+                    elif (
+                        hasattr(filing, "primary_doc_description")
+                        and filing.primary_doc_description
+                    ):
                         description = filing.primary_doc_description
-                    # Priority 3: Form Type
                     else:
                         description = f"Form {filing.form}"
-                        
-                    # Map to result
-                    results.append({
-                        "accessionNumber": filing.accession_no,
-                        "symbol": pure_symbol,
-                        "filingDate": filing.filing_date,
-                        "reportDate": filing.filing_date,
-                        "form": filing.form,
-                        "filingUrl": filing.homepage_url, # Index page URL
-                        "description": description
-                    })
-                    
+
+                    results.append(
+                        {
+                            "accessionNumber": filing.accession_no,
+                            "symbol": pure_symbol,
+                            "filingDate": filing.filing_date,
+                            "reportDate": filing.filing_date,
+                            "form": filing.form,
+                            "filingUrl": filing.homepage_url,
+                            "description": description,
+                        }
+                    )
+
                     count += 1
                     if limit and count >= limit:
                         break
-                        
-                    # Safety break
+
                     if count >= (limit * 5 if limit else 100):
                         break
-                
+
                 return results
             except Exception as e:
                 self.logger.error(f"Failed to fetch SEC filings via edgartools for {ticker}: {e}")
@@ -154,7 +150,7 @@ class EdgarAdapter(BaseDataAdapter):
         return await loop.run_in_executor(None, _do_fetch)
 
     # Implement other abstract methods with empty/None returns as EDGAR is mainly for filings
-    
+
     async def get_asset_info(self, ticker: str) -> Optional[Asset]:
         return None
 

@@ -40,7 +40,10 @@ tests/
 *.md
 docs/
 *.txt
-!requirements.txt
+!README.md
+!pyproject.toml
+!uv.lock
+!.python-version
 
 # 日志
 *.log
@@ -50,11 +53,6 @@ logs/
 .env
 .env.local
 .env.*.local
-
-# Docker 相关
-Dockerfile
-docker-compose.yml
-.dockerignore
 
 # 其他
 *.bak

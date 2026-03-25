@@ -33,17 +33,13 @@ from functools import wraps
 from typing import Any
 from fastmcp import FastMCP
 from src.server.core.bootstrap import init_adapters
+from src.server.auth_support import get_auth_mode, get_mcp_auth_provider
 from src.server.config.settings import get_settings
 from src.server.utils.logger import logger
 from src.server.mcp.registry import (
     register_tools,
     get_tool_group_info,
     get_enabled_tool_count,
-)
-from src.server.mcp.capability_contract import (
-    get_capability_contract_overview,
-    install_capability_contract,
-    register_capability_tools,
 )
 from src.server.mcp.envelope import (
     normalize_tool_exception as _normalize_tool_exception_impl,
@@ -137,8 +133,24 @@ def create_mcp_server() -> FastMCP:
     Returns:
         FastMCP: MCP server instance with all tools and tags
     """
+    auth_provider = get_mcp_auth_provider()
+    auth_mode = get_auth_mode()
+    if auth_mode == "jwt":
+        logger.info("🔐 FastMCP JWT service authentication enabled")
+    elif auth_mode == "token":
+        logger.info("🔐 Static bearer token authentication enabled")
+    else:
+        logger.warning(
+            "⚠️  FastMCP authentication is disabled; stock-mcp MCP endpoint is publicly accessible"
+        )
+
     # Create MCP instance with lifespan
-    mcp = FastMCP(name="stock-tool-mcp", version="1.0.0", lifespan=mcp_lifespan)
+    mcp = FastMCP(
+        name="stock-tool-mcp",
+        version="1.0.0",
+        lifespan=mcp_lifespan,
+        auth=auth_provider,
+    )
 
     settings = get_settings()
     _install_tool_guard(mcp, settings.timeout.mcp_tool_seconds)
@@ -146,9 +158,6 @@ def create_mcp_server() -> FastMCP:
     # Register all tool groups via registry
     logger.info("📦 Registering tool groups...")
     register_tools(mcp)
-    contract_state: dict[str, Any] = {}
-    register_capability_tools(mcp, contract_state)
-    contract_state["catalog"] = install_capability_contract(mcp, strict=True)
 
     logger.info("✅ MCP server created with all tools")
 
@@ -198,6 +207,8 @@ def create_filtered_mcp_server(
         FastMCP: Filtered MCP server instance
     """
     server_name = name or "stock-tool-mcp-filtered"
+    auth_provider = get_mcp_auth_provider()
+    logger.info("🔐 Filtered MCP server auth mode: %s", get_auth_mode())
 
     mcp = FastMCP(
         name=server_name,
@@ -205,15 +216,13 @@ def create_filtered_mcp_server(
         lifespan=mcp_lifespan,
         include_tags=include_tags,
         exclude_tags=exclude_tags,
+        auth=auth_provider,
     )
     settings = get_settings()
     _install_tool_guard(mcp, settings.timeout.mcp_tool_seconds)
 
-    # Register all enabled groups, then filter by tags/capability tags.
+    # Register all enabled groups, then filter by tags.
     register_tools(mcp)
-    contract_state: dict[str, Any] = {}
-    register_capability_tools(mcp, contract_state)
-    contract_state["catalog"] = install_capability_contract(mcp, strict=True)
 
     logger.info(f"✅ Filtered MCP server '{server_name}' created with tag filters")
     if include_tags:
@@ -222,30 +231,6 @@ def create_filtered_mcp_server(
         logger.info(f"   Exclude tags: {exclude_tags}")
 
     return mcp
-
-
-def create_capability_filtered_mcp_server(
-    include_capabilities: set[str] | None = None,
-    exclude_capabilities: set[str] | None = None,
-    name: str | None = None,
-) -> FastMCP:
-    """Create filtered server by capability ids (not tool names)."""
-    include_tags = (
-        {f"cap:{cap.strip()}" for cap in include_capabilities if cap.strip()}
-        if include_capabilities
-        else None
-    )
-    exclude_tags = (
-        {f"cap:{cap.strip()}" for cap in exclude_capabilities if cap.strip()}
-        if exclude_capabilities
-        else None
-    )
-    server_name = name or "stock-tool-mcp-capability-filtered"
-    return create_filtered_mcp_server(
-        include_tags=include_tags,
-        exclude_tags=exclude_tags,
-        name=server_name,
-    )
 
 
 def get_tools_by_tag(tag: str) -> list[str]:
@@ -260,8 +245,6 @@ def get_tools_by_tag(tag: str) -> list[str]:
     tools_by_tag = {
         "news": [],
         "research": [],
-        "contract": ["list_capabilities"],
-        "meta": ["list_capabilities"],
         "fundamental": [
             "get_financial_reports",
             "get_dividend_info",
@@ -321,21 +304,10 @@ def get_tools_by_tag(tag: str) -> list[str]:
 def get_server_info() -> dict:
     """Get MCP server information."""
     tags = get_tool_group_info()
-    tags["contract"] = {
-        "count": 1,
-        "description": "能力契约目录与版本元数据",
-        "enabled": True,
-    }
-    tags["meta"] = {
-        "count": 1,
-        "description": "协议层元信息工具",
-        "enabled": True,
-    }
     return {
         "name": "Stock Tool MCP",
         "version": "1.0.0",
-        "total_tools": get_enabled_tool_count() + 1,
-        "capability_contract": get_capability_contract_overview(),
+        "total_tools": get_enabled_tool_count(),
         "tags": tags,
         "endpoint": "http://localhost:9898/",
     }
@@ -350,8 +322,6 @@ def get_all_tags() -> set[str]:
     return {
         "news",
         "research",
-        "contract",
-        "meta",
         "fundamental",
         "asset",
         "technical",

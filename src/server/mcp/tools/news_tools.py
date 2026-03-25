@@ -11,8 +11,9 @@ from fastmcp import FastMCP, Context
 from src.server.core.dependencies import Container
 from src.server.utils.logger import logger
 from src.server.mcp.tools.artifact_utils import (
-    ComponentType,
+    ResourceVariant,
     create_artifact_envelope,
+    create_mcp_error_result,
     create_artifact_response,
 )
 
@@ -37,7 +38,7 @@ def register_news_tools(mcp: FastMCP):
         service = Container.news_service()
         logger.info("MCP tool: get_stock_news", symbol=symbol, days_back=days_back)
         result = await service.fetch_latest_news(symbol, days_back)
-        result["component_type"] = "news_list"
+        result["variant"] = "news_list"
 
         # 构建摘要 - 新闻数量和关键信息
         news_items = result.get("news", result.get("items", []))
@@ -50,7 +51,7 @@ def register_news_tools(mcp: FastMCP):
         metadata = f"{symbol}近{days_back}天新闻共{news_count}条: {headlines_str}..."
 
         return create_artifact_envelope(
-            component_type="news_citations",
+            variant="news_citations",
             name=f"{symbol} 相关新闻",
             content=result,
             description=metadata,
@@ -79,8 +80,7 @@ def register_news_tools(mcp: FastMCP):
             await ctx.info(f"📰 搜索新闻: {query}", extra={"limit": limit})
 
         try:
-            # Use web_search for general queries
-            results = await service.web_search(query)
+            results = await service.search_news(query, max_results=limit)
 
             # Limit results
             if isinstance(results, list):
@@ -90,12 +90,12 @@ def register_news_tools(mcp: FastMCP):
             if ctx:
                 await ctx.info(f"✅ 新闻搜索完成: {count}条结果")
 
-            result = {"items": results, "component_type": "news_citations"}
+            result = {"items": results, "variant": "news_citations"}
 
             description = f"搜索 '{query}' 找到 {count} 条新闻"
 
             return create_artifact_envelope(
-                component_type="news_citations",
+                variant="news_citations",
                 name=f"新闻搜索: {query}",
                 content=result,
                 description=description,
@@ -106,7 +106,7 @@ def register_news_tools(mcp: FastMCP):
             logger.error(f"Get latest news failed: {e}")
             if ctx:
                 await ctx.error(f"❌ 新闻搜索失败: {query}", extra={"error": str(e)})
-            return {"error": str(e)}
+            return create_mcp_error_result(str(e))
 
     # ------------------------------------------------------------------
     # get_us_news_sentiment  (对齐竞品: FinBERT风格情感评分)
@@ -150,7 +150,7 @@ def register_news_tools(mcp: FastMCP):
 
             # Fetch news headlines
             query = f"{raw_ticker} stock news"
-            raw_news = await service.web_search(query)
+            raw_news = await service.search_news(query, days_back=days_back, max_results=15)
             if not isinstance(raw_news, list):
                 raw_news = []
 
@@ -292,7 +292,7 @@ def register_news_tools(mcp: FastMCP):
             }
 
             artifact = create_artifact_envelope(
-                component_type=ComponentType.US_NEWS_SENTIMENT,
+                variant=ResourceVariant.US_NEWS_SENTIMENT,
                 name=f"{symbol} 新闻情感分析",
                 content=content,
                 description=summary,
@@ -306,7 +306,7 @@ def register_news_tools(mcp: FastMCP):
             logger.error("get_us_news_sentiment error", symbol=symbol, error=str(e))
             summary = f"获取 {symbol} 新闻情感失败: {e}"
             artifact = create_artifact_envelope(
-                component_type=ComponentType.US_NEWS_SENTIMENT,
+                variant=ResourceVariant.US_NEWS_SENTIMENT,
                 name=f"{symbol} 新闻情感",
                 content={"error": str(e)},
                 description=summary,

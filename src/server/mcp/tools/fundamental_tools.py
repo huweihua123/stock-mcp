@@ -16,6 +16,8 @@ from src.server.mcp.tools.artifact_utils import (
     create_artifact_response,
     create_artifact_list_response,
     create_chart_artifact,
+    create_mcp_tool_result,
+    create_mcp_error_result,
     create_symbol_error_response,
 )
 from src.server.domain.symbols.errors import SymbolResolutionError
@@ -199,7 +201,7 @@ def register_fundamental_tools(mcp: FastMCP):
 
             artifacts = [
                 create_artifact_envelope(
-                    component_type="financial_chart",
+                    variant="financial_chart",
                     name=f"Revenue Chart: {ts_code}",
                     content={
                         "title": "营业收入",
@@ -209,13 +211,13 @@ def register_fundamental_tools(mcp: FastMCP):
                     },
                     description=f"Revenue quarterly breakdown chart for {ts_code}",
                     metadata={
-                        "type": "financial_chart",
+                        "variant": "financial_chart",
                         "ts_code": ts_code,
                         "chart_type": "revenue",
                     },
                 ),
                 create_artifact_envelope(
-                    component_type="financial_chart",
+                    variant="financial_chart",
                     name=f"Net Income Chart: {ts_code}",
                     content={
                         "title": "归母净利润",
@@ -225,7 +227,7 @@ def register_fundamental_tools(mcp: FastMCP):
                     },
                     description=f"Net income quarterly breakdown chart for {ts_code}",
                     metadata={
-                        "type": "financial_chart",
+                        "variant": "financial_chart",
                         "ts_code": ts_code,
                         "chart_type": "net_income",
                     },
@@ -272,39 +274,40 @@ def register_fundamental_tools(mcp: FastMCP):
                     f"✅ 财务报告获取完成: {ts_code}", extra={"ts_code": ts_code}
                 )
 
-            response: Dict[str, Any] = {
-                **create_artifact_list_response(
-                    summary=summary_text, artifacts=artifacts
-                )
-            }
-            response["tool_scope"] = (
-                "This tool provides revenue/net-income trend charts only, not a full fundamental report."
+            response = create_artifact_list_response(
+                summary=summary_text,
+                artifacts=artifacts,
             )
-            response["coverage"] = {
-                "provided": [
-                    "revenue_trend",
-                    "net_income_trend",
-                ],
-                "missing": [
-                    "main_business_structure",
-                    "shareholder_structure",
-                    "dividend_history",
-                    "valuation_metrics",
-                    "profitability_ratios",
-                ],
-            }
-            response["next_recommended_tools"] = [
-                "get_mainbz_info",
-                "get_shareholder_info",
-                "get_dividend_info",
-            ]
+            response.structuredContent.update(
+                {
+                    "tool_scope": "This tool provides revenue/net-income trend charts only, not a full fundamental report.",
+                    "coverage": {
+                        "provided": [
+                            "revenue_trend",
+                            "net_income_trend",
+                        ],
+                        "missing": [
+                            "main_business_structure",
+                            "shareholder_structure",
+                            "dividend_history",
+                            "valuation_metrics",
+                            "profitability_ratios",
+                        ],
+                    },
+                    "next_recommended_tools": [
+                        "get_mainbz_info",
+                        "get_shareholder_info",
+                        "get_dividend_info",
+                    ],
+                }
+            )
             return response
 
         except SymbolResolutionError as e:
             if ctx:
                 await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
             return create_symbol_error_response(
-                e, component_type="financial_chart", name=f"{symbol} 财务报告"
+                e, variant="financial_chart", name=f"{symbol} 财务报告"
             )
         except Exception as e:
             logger.error(f"Get financial report failed: {e}")
@@ -312,7 +315,7 @@ def register_fundamental_tools(mcp: FastMCP):
                 await ctx.error(
                     f"❌ 获取财务报告失败: {symbol}", extra={"error": str(e)}
                 )
-            return {"error": str(e)}
+            return create_mcp_error_result(str(e))
 
     @mcp.tool(tags={"fundamental"})
     async def get_financial_reports(symbol: str, ctx: Context = None) -> Dict[str, Any]:
@@ -376,15 +379,27 @@ def register_fundamental_tools(mcp: FastMCP):
                     f"{ts_code} 主营构成暂无数据 (NO_DATA): {no_data_reason}. "
                     "建议补证：改用财务/股东结构化工具，并用公告或网页检索补主营结构叙事。"
                 )
-                empty_artifact = create_artifact_envelope(
-                    component_type="table",
-                    name=f"Main Business Composition (No Data): {ts_code}",
-                    content={
-                        "ts_code": ts_code,
-                        "status": "no_data",
-                        "reason": no_data_reason,
-                        "source": "fina_mainbz",
-                        "rows": [],
+                response = create_mcp_tool_result(
+                    summary_text,
+                    resources=[],
+                    no_data_reason=no_data_reason,
+                    is_error=False,
+                )
+                response.structuredContent.update(
+                    {
+                        "scope": {
+                            "tool": "get_mainbz_info",
+                            "ts_code": ts_code,
+                            "source": "fina_mainbz",
+                            "reason": no_data_reason,
+                        },
+                        "retriable": False,
+                        "next_recommended_tools": [
+                            "get_financial_reports",
+                            "get_shareholder_info",
+                            "get_dividend_info",
+                        ],
+                        "suggested_reroute": "If main business mix is required, route to filings/web search evidence.",
                         "coverage": coverage
                         if isinstance(coverage, dict)
                         else {
@@ -393,41 +408,8 @@ def register_fundamental_tools(mcp: FastMCP):
                             "expected_dimensions": ["P", "D", "I"],
                             "latest_period": None,
                         },
-                        "source_type_required_next": [
-                            "structured_financial",
-                            "filings_or_web_news",
-                        ],
-                    },
-                    description=summary_text,
-                    metadata={
-                        "type": "main_business",
-                        "ts_code": ts_code,
-                        "source": "fina_mainbz",
-                        "result_status": "no_data",
                         "upstream_status": upstream_status or "unknown",
-                    },
-                    visible_to_llm=True,
-                    display_in_report=True,
-                )
-                response: Dict[str, Any] = {
-                    **create_artifact_response(summary=summary_text, artifact=empty_artifact)
-                }
-                response["result_status"] = "no_data"
-                response["no_data_reason"] = no_data_reason
-                response["scope"] = {
-                    "tool": "get_mainbz_info",
-                    "ts_code": ts_code,
-                    "source": "fina_mainbz",
-                    "reason": no_data_reason,
-                }
-                response["retriable"] = False
-                response["next_recommended_tools"] = [
-                    "get_financial_reports",
-                    "get_shareholder_info",
-                    "get_dividend_info",
-                ]
-                response["reroute_if_blocked"] = (
-                    "If main business mix is required, route to filings/web search evidence."
+                    }
                 )
                 if ctx:
                     await ctx.warning(
@@ -467,7 +449,7 @@ def register_fundamental_tools(mcp: FastMCP):
 
                 artifacts.append(
                     create_artifact_envelope(
-                        component_type="pie_chart",
+                        variant="pie_chart",
                         name=f"Main Business Revenue Composition ({title_suffix}): {ts_code}",
                         content={
                             "title": f"主营业务营收构成 - {title_suffix}",
@@ -480,7 +462,7 @@ def register_fundamental_tools(mcp: FastMCP):
                         },
                         description=f"Main business revenue composition ({title_suffix}) for {ts_code}",
                         metadata={
-                            "type": "pie_chart",
+                            "variant": "pie_chart",
                             "ts_code": ts_code,
                             "dimension": dim,
                             "source": "fina_mainbz",
@@ -525,7 +507,7 @@ def register_fundamental_tools(mcp: FastMCP):
             if ctx:
                 await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
             return create_symbol_error_response(
-                e, component_type="main_business", name=f"{symbol} 主营业务构成"
+                e, variant="main_business", name=f"{symbol} 主营业务构成"
             )
         except Exception as e:
             logger.error(f"Get main business info failed: {e}")
@@ -533,7 +515,7 @@ def register_fundamental_tools(mcp: FastMCP):
                 await ctx.error(
                     f"❌ 获取主营业务构成失败: {symbol}", extra={"error": str(e)}
                 )
-            return {"error": str(e)}
+            return create_mcp_error_result(str(e))
 
     @mcp.tool(tags={"fundamental"})
     async def get_shareholder_info(
@@ -543,7 +525,7 @@ def register_fundamental_tools(mcp: FastMCP):
     ) -> Dict[str, Any]:
         """Get shareholder info for the given ticker."""
         if not symbol and not ts_code:
-            return {"error": "symbol or ts_code is required"}
+            return create_mcp_error_result("symbol or ts_code is required")
         raw_symbol = ts_code or symbol
         if ctx:
             await ctx.info(
@@ -608,7 +590,7 @@ def register_fundamental_tools(mcp: FastMCP):
                     )
                 artifacts.append(
                     create_artifact_envelope(
-                        component_type="table",
+                        variant="table",
                         name=f"前十大股东: {ts_code}",
                         content={
                             "title": "前十大股东",
@@ -634,7 +616,7 @@ def register_fundamental_tools(mcp: FastMCP):
                         },
                         description=f"Top 10 shareholders for {ts_code}",
                         metadata={
-                            "type": "table",
+                            "variant": "table",
                             "ts_code": ts_code,
                             "dataset": "top10_holders",
                         },
@@ -661,7 +643,7 @@ def register_fundamental_tools(mcp: FastMCP):
                     )
                 artifacts.append(
                     create_artifact_envelope(
-                        component_type="table",
+                        variant="table",
                         name=f"前十大流通股东: {ts_code}",
                         content={
                             "title": "前十大流通股东",
@@ -687,7 +669,7 @@ def register_fundamental_tools(mcp: FastMCP):
                         },
                         description=f"Top 10 tradable shareholders for {ts_code}",
                         metadata={
-                            "type": "table",
+                            "variant": "table",
                             "ts_code": ts_code,
                             "dataset": "top10_floatholders",
                         },
@@ -710,12 +692,12 @@ def register_fundamental_tools(mcp: FastMCP):
                     )
                 artifacts.append(
                     create_artifact_envelope(
-                        component_type="holder_number_trend",
+                        variant="holder_number_trend",
                         name=f"股东户数变化趋势: {ts_code}",
                         content={"ts_code": ts_code, "holder_number_trend": trend},
                         description=f"Shareholder count trend chart (3 years) for {ts_code}",
                         metadata={
-                            "type": "holder_number_trend",
+                            "variant": "holder_number_trend",
                             "ts_code": ts_code,
                             "dataset": "holder_number_trend",
                         },
@@ -755,7 +737,7 @@ def register_fundamental_tools(mcp: FastMCP):
                     )
                 artifacts.append(
                     create_artifact_envelope(
-                        component_type="table",
+                        variant="table",
                         name=f"股东增减持情况: {ts_code}",
                         content={
                             "title": "股东增减持情况",
@@ -785,7 +767,7 @@ def register_fundamental_tools(mcp: FastMCP):
                         },
                         description=f"Shareholder trading records (1 year) for {ts_code}",
                         metadata={
-                            "type": "table",
+                            "variant": "table",
                             "ts_code": ts_code,
                             "dataset": "holder_trade",
                         },
@@ -829,7 +811,7 @@ def register_fundamental_tools(mcp: FastMCP):
             if ctx:
                 await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
             return create_symbol_error_response(
-                e, component_type="shareholder_info", name=f"{symbol} 股东信息"
+                e, variant="shareholder_info", name=f"{symbol} 股东信息"
             )
         except Exception as e:
             logger.error(f"Get shareholder info failed: {e}")
@@ -837,7 +819,7 @@ def register_fundamental_tools(mcp: FastMCP):
                 await ctx.error(
                     f"❌ 获取股东信息失败: {symbol}", extra={"error": str(e)}
                 )
-            return {"error": str(e)}
+            return create_mcp_error_result(str(e))
 
     @mcp.tool(tags={"fundamental"})
     async def get_dividend_info(symbol: str, ctx: Context = None) -> Dict[str, Any]:
@@ -877,7 +859,7 @@ def register_fundamental_tools(mcp: FastMCP):
             ]
 
             table_artifact = create_artifact_envelope(
-                component_type="table",
+                variant="table",
                 name=f"Dividend History: {ts_code}",
                 content={
                     "title": "分红送股历史",
@@ -887,7 +869,7 @@ def register_fundamental_tools(mcp: FastMCP):
                 },
                 description=f"Dividend history for {ts_code}",
                 metadata={
-                    "type": "table",
+                    "variant": "table",
                     "ts_code": ts_code,
                     "dataset": "dividend",
                 },
@@ -955,7 +937,7 @@ def register_fundamental_tools(mcp: FastMCP):
             if ctx:
                 await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
             return create_symbol_error_response(
-                e, component_type="dividend_info", name=f"{symbol} 分红送股"
+                e, variant="dividend_info", name=f"{symbol} 分红送股"
             )
         except Exception as e:
             logger.error(f"Get dividend info failed: {e}")
@@ -963,7 +945,7 @@ def register_fundamental_tools(mcp: FastMCP):
                 await ctx.error(
                     f"❌ 获取分红送股信息失败: {symbol}", extra={"error": str(e)}
                 )
-            return {"error": str(e)}
+            return create_mcp_error_result(str(e))
 
     @mcp.tool(tags={"fundamental"})
     async def get_forecast_info(
@@ -974,7 +956,7 @@ def register_fundamental_tools(mcp: FastMCP):
     ) -> Dict[str, Any]:
         """Get performance forecast info for the given A-share ticker."""
         if not symbol and not ts_code:
-            return {"error": "symbol or ts_code is required"}
+            return create_mcp_error_result("symbol or ts_code is required")
 
         raw_symbol = ts_code or symbol
         if ctx:
@@ -1009,7 +991,7 @@ def register_fundamental_tools(mcp: FastMCP):
             ]
 
             table_artifact = create_artifact_envelope(
-                component_type="table",
+                variant="table",
                 name=f"Performance Forecast: {ts_code_value}",
                 content={
                     "title": "业绩预告",
@@ -1019,7 +1001,7 @@ def register_fundamental_tools(mcp: FastMCP):
                 },
                 description=f"Performance forecast for {ts_code_value}",
                 metadata={
-                    "type": "table",
+                    "variant": "table",
                     "ts_code": ts_code_value,
                     "dataset": "forecast",
                 },
@@ -1049,7 +1031,7 @@ def register_fundamental_tools(mcp: FastMCP):
             if ctx:
                 await ctx.warning(f"⚠️ 符号解析失败: {raw_symbol}", extra=e.to_dict())
             return create_symbol_error_response(
-                e, component_type="table", name=f"{raw_symbol} 业绩预告"
+                e, variant="table", name=f"{raw_symbol} 业绩预告"
             )
         except Exception as e:
             logger.error(f"Get forecast info failed: {e}")
@@ -1058,7 +1040,7 @@ def register_fundamental_tools(mcp: FastMCP):
                     f"❌ 获取业绩预告失败: {raw_symbol}",
                     extra={"error": str(e)},
                 )
-            return {"error": str(e)}
+            return create_mcp_error_result(str(e))
 
     @mcp.tool(tags={"fundamental"})
     async def get_valuation_metrics(
@@ -1100,7 +1082,7 @@ def register_fundamental_tools(mcp: FastMCP):
             )
 
             if data.get("error"):
-                return {"error": data["error"]}
+                return create_mcp_error_result(str(data["error"]))
 
             ts_code = data.get("symbol") or await _resolve_ts_code(symbol)
             metrics = data.get("metrics", {})
@@ -1174,7 +1156,7 @@ def register_fundamental_tools(mcp: FastMCP):
 
             artifacts.append(
                 create_artifact_envelope(
-                    component_type="table",
+                    variant="table",
                     name=f"Valuation Metrics: {ts_code}",
                     content={
                         "title": "估值指标",
@@ -1197,7 +1179,7 @@ def register_fundamental_tools(mcp: FastMCP):
                     },
                     description=f"Valuation metrics with percentile ranking for {ts_code}",
                     metadata={
-                        "type": "table",
+                        "variant": "table",
                         "ts_code": ts_code,
                         "dataset": "valuation_metrics",
                     },
@@ -1211,7 +1193,7 @@ def register_fundamental_tools(mcp: FastMCP):
             if history.get("dates"):
                 artifacts.append(
                     create_artifact_envelope(
-                        component_type="valuation_chart",
+                        variant="valuation_chart",
                         name=f"Valuation History: {ts_code}",
                         content={
                             "title": "估值历史走势",
@@ -1226,7 +1208,7 @@ def register_fundamental_tools(mcp: FastMCP):
                             f"({days} trading days)"
                         ),
                         metadata={
-                            "type": "valuation_chart",
+                            "variant": "valuation_chart",
                             "ts_code": ts_code,
                         },
                         visible_to_llm=False,
@@ -1250,7 +1232,7 @@ def register_fundamental_tools(mcp: FastMCP):
                 await ctx.warning(f"⚠️ 符号解析失败: {symbol}", extra=e.to_dict())
             return create_symbol_error_response(
                 e,
-                component_type="valuation_metrics",
+                variant="valuation_metrics",
                 name=f"{symbol} 估值指标",
             )
         except Exception as e:
@@ -1260,4 +1242,4 @@ def register_fundamental_tools(mcp: FastMCP):
                     f"❌ 获取估值指标失败: {symbol}",
                     extra={"error": str(e)},
                 )
-            return {"error": str(e)}
+            return create_mcp_error_result(str(e))

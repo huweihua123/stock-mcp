@@ -46,12 +46,12 @@ def register_us_macro_tools(mcp: FastMCP):
             )
 
             artifact = create_artifact_envelope(
-                component_type="us_gdp",
+                variant="us_gdp",
                 name="US Real GDP Trend",
                 content={"data": rows},
                 description=summary,
                 metadata={
-                    "type": "us_gdp",
+                    "variant": "us_gdp",
                     "title": "US Real GDP & Growth (YoY)",
                     "description": "Quarterly US Real GDP levels and Year-over-Year growth rates.",
                 },
@@ -63,7 +63,7 @@ def register_us_macro_tools(mcp: FastMCP):
             logger.error("get_us_economic_growth error", error=str(e))
             summary = f"获取美国经济增长数据失败: {e}"
             artifact = create_artifact_envelope(
-                component_type="us_gdp",
+                variant="us_gdp",
                 name="US Real GDP Trend",
                 content={"error": str(e)},
                 description=summary,
@@ -99,12 +99,12 @@ def register_us_macro_tools(mcp: FastMCP):
             )
 
             artifact = create_artifact_envelope(
-                component_type="us_inflation",
+                variant="us_inflation",
                 name="Inflation vs Employment",
                 content={"data": rows},
                 description=summary,
                 metadata={
-                    "type": "us_inflation",
+                    "variant": "us_inflation",
                     "title": "Inflation (CPI YoY) vs Unemployment",
                     "description": "Monthly comparison of US CPI YoY inflation and unemployment rate.",
                 },
@@ -116,7 +116,7 @@ def register_us_macro_tools(mcp: FastMCP):
             logger.error("get_us_inflation_employment error", error=str(e))
             summary = f"获取美国通胀与就业数据失败: {e}"
             artifact = create_artifact_envelope(
-                component_type="us_inflation",
+                variant="us_inflation",
                 name="Inflation vs Employment",
                 content={"error": str(e)},
                 description=summary,
@@ -154,12 +154,12 @@ def register_us_macro_tools(mcp: FastMCP):
             )
 
             artifact = create_artifact_envelope(
-                component_type="us_interest_rates",
+                variant="us_interest_rates",
                 name="US Interest Rates",
                 content={"data": rows},
                 description=summary,
                 metadata={
-                    "type": "us_interest_rates",
+                    "variant": "us_interest_rates",
                     "title": "US Yield Curve & Fed Funds Rate",
                     "description": "Daily tracking of 10Y/2Y Treasury yields and Fed Funds rate.",
                 },
@@ -171,7 +171,7 @@ def register_us_macro_tools(mcp: FastMCP):
             logger.error("get_us_interest_rates error", error=str(e))
             summary = f"获取美国利率数据失败: {e}"
             artifact = create_artifact_envelope(
-                component_type="us_interest_rates",
+                variant="us_interest_rates",
                 name="US Interest Rates",
                 content={"error": str(e)},
                 description=summary,

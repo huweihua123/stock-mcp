@@ -25,8 +25,9 @@ from src.server.core.use_cases import fundamental as fundamental_use_cases
 from src.server.core.use_cases import technical as technical_use_cases
 from src.server.core.use_cases import filings as filings_use_cases
 from src.server.mcp.tools.artifact_utils import (
-    ComponentType,
+    ResourceVariant,
     create_artifact_envelope,
+    create_mcp_tool_result,
     create_artifact_response,
 )
 from src.server.utils.logger import logger
@@ -103,6 +104,52 @@ def _contains_required_sections(text: str) -> Dict[str, bool]:
     return {sec: (sec in text) for sec in required}
 
 
+def _build_no_data_response(
+    *,
+    summary: str,
+    artifact: Dict[str, Any],
+    reason: str,
+    scope: Dict[str, Any],
+    suggested_reroute: str,
+) -> Dict[str, Any]:
+    scope_payload: Dict[str, Any] = dict(scope) if isinstance(scope, dict) else {}
+    scope_payload.setdefault("retry_same_query_allowed", False)
+    guard_parts = [
+        str(scope_payload.get("tool") or ""),
+        str(
+            scope_payload.get("sector_id")
+            or scope_payload.get("resolved_sector")
+            or scope_payload.get("sector_name")
+            or ""
+        ),
+        str(scope_payload.get("days") or scope_payload.get("sample_size") or ""),
+    ]
+    scope_payload.setdefault("loop_guard_key", "|".join(guard_parts))
+
+    reroute_text = str(suggested_reroute or "").strip()
+    loop_guard_prefix = "不要重复同参调用同一工具；"
+    if loop_guard_prefix not in reroute_text:
+        reroute_text = f"{loop_guard_prefix}{reroute_text}" if reroute_text else loop_guard_prefix
+    return create_mcp_tool_result(
+        summary,
+        resources=[],
+        no_data_reason=str(reason or "").strip() or "query returned no data",
+        is_error=False,
+        error=None,
+    ).model_copy(
+        update={
+            "structuredContent": {
+                "resources": [],
+                "noDataReason": str(reason or "").strip() or "query returned no data",
+                "scope": scope_payload,
+                "retriable": False,
+                "retry_same_query_allowed": False,
+                "suggested_reroute": reroute_text,
+            }
+        }
+    )
+
+
 async def _resolve_symbols(symbols: List[str]) -> List[str]:
     gateway = Container.market_gateway()
     resolved: List[str] = []
@@ -150,7 +197,20 @@ async def _build_cn_universe_from_tushare(
             "note": "sector resolver unavailable, please provide symbols explicitly",
         }
 
-    index_code, index_name, candidates = await tushare._resolve_sector_index(sector_name)
+    sector_query = (sector_name or "").strip()
+    index_code = None
+    index_name = None
+    candidates = None
+    # Support direct tushare sector code input (e.g. 877042.TI).
+    if (
+        sector_query
+        and "." in sector_query
+        and sector_query.upper().endswith(".TI")
+        and hasattr(tushare, "_resolve_sector_by_code")
+    ):
+        index_code, index_name = await tushare._resolve_sector_by_code(sector_query.upper())
+    if not index_code:
+        index_code, index_name, candidates = await tushare._resolve_sector_index(sector_query)
     if not index_code:
         return {
             "universe": [],
@@ -358,7 +418,7 @@ def register_sector_research_tools(mcp: FastMCP):
             f"深度={depth}, 同业样本={safe_peer_count}, 观察窗={safe_horizon}天"
         )
         artifact = create_artifact_envelope(
-            component_type=ComponentType.PLAN_TASK,
+            variant=ResourceVariant.OTHER,
             name=f"Sector Scope: {sector_name}",
             content={"scope": scope, "recommended_tools": recommended_tools},
             description=summary,
@@ -373,7 +433,7 @@ def register_sector_research_tools(mcp: FastMCP):
     async def build_sector_universe(
         sector_name: str,
         market: str = "auto",
-        symbols: List[str] = None,
+        symbols: Optional[List[str]] = None,
         max_companies: int = 10,
         ctx: Context = None,
     ) -> Dict[str, Any]:
@@ -427,7 +487,7 @@ def register_sector_research_tools(mcp: FastMCP):
             f"market={detected_market}, source={source}"
         )
         artifact = create_artifact_envelope(
-            component_type=ComponentType.TABLE,
+            variant=ResourceVariant.SECTOR_UNIVERSE,
             name=f"Sector Universe: {sector_name}",
             content={
                 "sector_name": sector_name,
@@ -450,6 +510,53 @@ def register_sector_research_tools(mcp: FastMCP):
                     "source": source,
                 },
             )
+        if not universe:
+            note = str(extra.get("note") or "").strip()
+            candidates = extra.get("candidates") or []
+            candidate_count = len(candidates) if isinstance(candidates, list) else 0
+            note_lower = note.lower()
+
+            if candidate_count > 0 or "ambiguous" in note_lower:
+                no_data_reason = f"ambiguous sector query: {sector_name}"
+                reroute = (
+                    "Use one exact candidate sector_name and rerun build_sector_universe."
+                )
+            elif "not found" in note_lower:
+                no_data_reason = f"sector not found: {sector_name}"
+                reroute = (
+                    "Try resolve_sector first, or provide explicit symbols to build_sector_universe."
+                )
+            elif "empty member list" in note_lower:
+                no_data_reason = f"empty member list for sector: {sector_name}"
+                reroute = (
+                    "Provide explicit symbols or reroute to get_sector_trend/"
+                    "get_sector_valuation_metrics for supplementary evidence."
+                )
+            else:
+                no_data_reason = note or "sector universe is empty"
+                reroute = (
+                    "Provide explicit symbols or resolve a canonical sector first."
+                )
+
+            no_data_summary = f"{sector_name} 样本池暂无可用公司列表: {no_data_reason}"
+            artifact["description"] = no_data_summary
+            return _build_no_data_response(
+                summary=no_data_summary,
+                artifact=artifact,
+                reason=no_data_reason,
+                scope={
+                    "tool": "build_sector_universe",
+                    "sector_name": sector_name,
+                    "market": detected_market,
+                    "source": source,
+                    "max_companies": max_companies,
+                    "candidate_count": candidate_count,
+                    "index_code": extra.get("index_code"),
+                    "note": note,
+                },
+                suggested_reroute=reroute,
+            )
+
         return create_artifact_response(summary=summary, artifact=artifact)
 
     @mcp.tool(tags={"sector-research", "research"})
@@ -463,7 +570,7 @@ def register_sector_research_tools(mcp: FastMCP):
         if not symbols:
             summary = "构建同业对比失败: symbols 不能为空"
             artifact = create_artifact_envelope(
-                component_type=ComponentType.TABLE,
+                variant=ResourceVariant.PEER_BENCHMARK,
                 name=f"Peer Benchmark: {sector_name}",
                 content={"error": "symbols is empty", "rows": []},
                 description=summary,
@@ -483,7 +590,7 @@ def register_sector_research_tools(mcp: FastMCP):
         )
 
         artifact = create_artifact_envelope(
-            component_type=ComponentType.TABLE,
+            variant=ResourceVariant.PEER_BENCHMARK,
             name=f"Peer Benchmark: {sector_name}",
             content={
                 "sector_name": sector_name,
@@ -512,7 +619,7 @@ def register_sector_research_tools(mcp: FastMCP):
         if not symbols:
             summary = "价值链分类失败: symbols 不能为空"
             artifact = create_artifact_envelope(
-                component_type=ComponentType.TABLE,
+                variant=ResourceVariant.VALUE_CHAIN,
                 name=f"Value Chain: {sector_name}",
                 content={"error": "symbols is empty", "rows": [], "stage_counts": {}},
                 description=summary,
@@ -573,7 +680,7 @@ def register_sector_research_tools(mcp: FastMCP):
             f"{stage_counts.get('下游', 0)}/{stage_counts.get('待判定', 0)}"
         )
         artifact = create_artifact_envelope(
-            component_type=ComponentType.TABLE,
+            variant=ResourceVariant.VALUE_CHAIN,
             name=f"Value Chain: {sector_name}",
             content={
                 "sector_name": sector_name,
@@ -600,7 +707,7 @@ def register_sector_research_tools(mcp: FastMCP):
     async def build_sector_evidence_pack(
         sector_name: str,
         market: str = "auto",
-        symbols: List[str] = None,
+        symbols: Optional[List[str]] = None,
         days: int = 120,
         include_filings: bool = True,
         ctx: Context = None,
@@ -712,7 +819,7 @@ def register_sector_research_tools(mcp: FastMCP):
             f"filings={len(filings_digest)}"
         )
         artifact = create_artifact_envelope(
-            component_type=ComponentType.RESEARCH_REPORTS,
+            variant=ResourceVariant.SECTOR_EVIDENCE_PACK,
             name=f"Sector Evidence Pack: {sector_name}",
             content=evidence_pack,
             description=summary,
@@ -860,7 +967,7 @@ def register_sector_research_tools(mcp: FastMCP):
             f"flow={snapshot['flow_signal']}, valuation={snapshot['valuation_level']}"
         )
         artifact = create_artifact_envelope(
-            component_type=ComponentType.MARKET_LIQUIDITY,
+            variant=ResourceVariant.MARKET_LIQUIDITY,
             name=f"Sector Structure Snapshot: {sector_name}",
             content={"snapshot": snapshot, "evidence": evidence},
             description=summary,
@@ -882,7 +989,7 @@ def register_sector_research_tools(mcp: FastMCP):
     @mcp.tool(tags={"sector-research", "research"})
     async def quality_gate_sector_report(
         report_markdown: str,
-        evidence_pack: Dict[str, Any] = None,
+        evidence_pack: Dict[str, Any] | None = None,
         min_numeric_facts: int = 6,
         require_question: bool = True,
         ctx: Context = None,
@@ -955,7 +1062,7 @@ def register_sector_research_tools(mcp: FastMCP):
         }
 
         artifact = create_artifact_envelope(
-            component_type=ComponentType.PLAN_TASK,
+            variant=ResourceVariant.OTHER,
             name="Sector Report Quality Gate",
             content=result,
             description=summary,

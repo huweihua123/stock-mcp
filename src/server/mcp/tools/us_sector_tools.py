@@ -19,7 +19,7 @@ from fastmcp import FastMCP, Context
 from src.server.core.use_cases import technical as technical_use_cases
 from src.server.utils.logger import logger
 from src.server.mcp.tools.artifact_utils import (
-    ComponentType,
+    ResourceVariant,
     create_artifact_envelope,
     create_artifact_response,
 )
@@ -92,7 +92,7 @@ def register_us_sector_tools(mcp: FastMCP):
             )
 
             artifact = create_artifact_envelope(
-                component_type=ComponentType.US_SECTOR_ETF,
+                variant=ResourceVariant.US_SECTOR_ETF,
                 name=f"{sector_name} 板块ETF ({etf})",
                 content=data,
                 description=summary,
@@ -115,7 +115,7 @@ def register_us_sector_tools(mcp: FastMCP):
             )
             summary = f"获取{sector_name}板块ETF数据失败: {e}"
             artifact = create_artifact_envelope(
-                component_type=ComponentType.US_SECTOR_ETF,
+                variant=ResourceVariant.US_SECTOR_ETF,
                 name=f"{sector_name} 板块ETF",
                 content={"error": str(e)},
                 description=summary,

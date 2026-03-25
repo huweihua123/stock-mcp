@@ -139,7 +139,7 @@ class TwelveDataAdapter(BaseDataAdapter):
         try:
             timeout = httpx.Timeout(20.0)
             proxy = self.proxy_url
-            async with httpx.AsyncClient(timeout=timeout, proxy=proxy) as client:
+            async with httpx.AsyncClient(timeout=timeout, proxy=proxy, trust_env=False) as client:
                 resp = await client.get(url, params=params)
                 resp.raise_for_status()
                 data = resp.json()
@@ -196,7 +196,7 @@ class TwelveDataAdapter(BaseDataAdapter):
         try:
             timeout = httpx.Timeout(20.0)
             proxy = self.proxy_url
-            async with httpx.AsyncClient(timeout=timeout, proxy=proxy) as client:
+            async with httpx.AsyncClient(timeout=timeout, proxy=proxy, trust_env=False) as client:
                 resp = await client.get(url, params=params)
                 resp.raise_for_status()
                 data = resp.json()
